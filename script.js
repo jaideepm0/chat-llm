@@ -70,6 +70,8 @@ Tips:
   })();
 
   const THEME_KEY = 'chat_theme_preference';
+  const PRISM_LIGHT_ID = 'prism-light';
+  const PRISM_DARK_ID = 'prism-dark';
 
   function configureMarkdown() {
     if (window.marked) {
@@ -84,25 +86,36 @@ Tips:
         return html;
       };
 
+      function normalizeLanguage(lang) {
+        if (!lang) return '';
+        const l = String(lang).toLowerCase().trim();
+        const map = {
+          js: 'javascript', jsx: 'javascript', ts: 'typescript', tsx: 'typescript',
+          sh: 'bash', shell: 'bash', zsh: 'bash', console: 'bash',
+          py: 'python',
+          yml: 'yaml',
+          md: 'markdown'
+        };
+        return map[l] || l;
+      }
+
+      // Normalize language for Prism but let Marked output default
+      const originalCode = renderer.code;
+      renderer.code = function codeRenderer(code, infoString, escaped) {
+        const lang = normalizeLanguage(infoString);
+        return originalCode.call(this, code, lang, escaped);
+      };
+
       window.marked.setOptions({
         breaks: true,
         gfm: true,
         mangle: false,
         headerIds: false,
-        renderer,
-        highlight(code, lang) {
-          if (window.hljs) {
-            const language = lang && window.hljs.getLanguage(lang) ? lang : 'plaintext';
-            return window.hljs.highlight(code, { language }).value;
-          }
-          return code;
-        }
+        renderer
       });
     }
 
-    if (window.hljs?.configure) {
-      window.hljs.configure({ ignoreUnescapedHTML: true });
-    }
+    // Prism does not need configuration here; we'll highlight after insertion
   }
 
   function renderMarkdown(text) {
@@ -116,6 +129,10 @@ Tips:
   function applyMarkdown(element, markdown) {
     if (!element) return;
     element.innerHTML = renderMarkdown(markdown);
+    // Highlight code blocks within this element using Prism
+    if (window.Prism?.highlightAllUnder) {
+      window.Prism.highlightAllUnder(element);
+    }
   }
 
   function parseCopySections(source) {
@@ -139,6 +156,19 @@ Tips:
     }
     if (storage) {
       storage.setItem(THEME_KEY, normalized);
+    }
+
+    // Toggle PrismCSS styles to match theme for uniform code blocks
+    const light = document.getElementById(PRISM_LIGHT_ID);
+    const dark = document.getElementById(PRISM_DARK_ID);
+    if (light && dark) {
+      if (normalized === 'dark') {
+        light.setAttribute('disabled', '');
+        dark.removeAttribute('disabled');
+      } else {
+        dark.setAttribute('disabled', '');
+        light.removeAttribute('disabled');
+      }
     }
   }
 
@@ -217,7 +247,7 @@ Tips:
     if (!hasMessages) {
       const markdownHolder = document.createElement('div');
       markdownHolder.className = 'markdown-body mx-auto text-start';
-      markdownHolder.style.maxWidth = '720px';
+      markdownHolder.style.maxWidth = 'var(--content-max)';
       applyMarkdown(markdownHolder, emptyStateMarkdown);
       emptyState.replaceChildren(markdownHolder);
     }
@@ -246,18 +276,14 @@ Tips:
     contentEl.classList.add('markdown-body');
 
     avatarEl.className = 'avatar rounded-circle d-flex align-items-center justify-content-center fw-semibold';
-    cardEl.className = 'card shadow-sm flex-grow-1';
+    cardEl.className = 'card shadow-sm border-0 flex-grow-1';
     metadataEl.className = 'message-metadata d-flex gap-2 small text-body-secondary mb-2';
     statusEl.className = 'status text-body-secondary';
 
     if (role === 'user') {
       avatarEl.classList.add('bg-dark', 'text-white');
-      cardEl.classList.add('bg-dark', 'text-white');
-      metadataEl.classList.add('text-white-50');
-      statusEl.classList.add('text-white-50');
     } else {
       avatarEl.classList.add('bg-primary-subtle', 'text-primary');
-      cardEl.classList.add('bg-body-secondary');
     }
 
     if (status) {
@@ -289,25 +315,19 @@ Tips:
     const contentEl = messageEl.querySelector('.message-content');
     const metadataEl = messageEl.querySelector('.message-metadata');
     const cardEl = messageEl.querySelector('.card');
-    const isUser = messageEl.classList.contains('user');
 
     if (metadataEl) {
       metadataEl.classList.remove('text-white-50', 'text-body-secondary');
-      metadataEl.classList.add(isUser ? 'text-white-50' : 'text-body-secondary');
+      metadataEl.classList.add('text-body-secondary');
     }
 
     if (cardEl) {
-      cardEl.className = 'card border-0 shadow-sm flex-grow-1';
-      if (isUser) {
-        cardEl.classList.add('bg-dark', 'text-white');
-      } else {
-        cardEl.classList.add('bg-body-secondary');
-      }
+      cardEl.className = 'card shadow-sm border-0 flex-grow-1';
     }
 
     if (statusEl) {
       statusEl.classList.remove('text-white-50', 'text-body-secondary');
-      statusEl.classList.add(isUser ? 'text-white-50' : 'text-body-secondary');
+      statusEl.classList.add('text-body-secondary');
     }
 
     if (typeof status !== 'undefined') {
@@ -358,6 +378,20 @@ Tips:
     }
   }
 
+  function modelSupportsTemperature(model) {
+    return !(model?.startsWith('gpt-5'));
+  }
+
+  function applyModelAffordances() {
+    const model = dom.modelSelect.value;
+    const supportsTemp = modelSupportsTemperature(model);
+    dom.temperatureInput.disabled = !supportsTemp;
+    const wrapper = dom.temperatureInput.closest('.d-grid');
+    if (wrapper) {
+      wrapper.classList.toggle('opacity-50', !supportsTemp);
+    }
+  }
+
   async function sendMessage(text) {
     const trimmed = text.trim();
     if (!trimmed || state.isProcessing) return;
@@ -385,17 +419,21 @@ Tips:
     setProcessing(true);
 
     try {
+      const requestBody = {
+        model,
+        messages: state.history
+      };
+      if (modelSupportsTemperature(model)) {
+        requestBody.temperature = temperature;
+      }
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`
         },
-        body: JSON.stringify({
-          model,
-          messages: state.history,
-          temperature
-        })
+        body: JSON.stringify(requestBody)
       });
 
       if (!response.ok) {
@@ -455,6 +493,8 @@ Tips:
         dom.settingsSummary.textContent = original;
       }, 2000);
     }
+
+    applyModelAffordances();
   }
 
   function autoResizeTextarea() {
@@ -492,8 +532,10 @@ Tips:
     dom.userInput.addEventListener('input', handleComposerInput);
     dom.userInput.addEventListener('keydown', handleComposerKeydown);
     dom.settingsForm.addEventListener('submit', handleSettingsSubmit);
+    dom.modelSelect.addEventListener('change', applyModelAffordances);
 
     handleComposerInput();
+    applyModelAffordances();
   }
 
   document.addEventListener('DOMContentLoaded', activate);
