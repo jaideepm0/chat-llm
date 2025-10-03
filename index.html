@@ -14,10 +14,10 @@
 </head>
 <body class="bg-body text-body" style="font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;">
   <div class="app d-flex flex-column min-vh-100 w-100">
-    <header class="app-header border-bottom bg-body-tertiary py-3">
+    <header class="py-3 border-bottom bg-body-tertiary">
       <div class="container-xl d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
         <div class="d-flex align-items-center gap-3" role="banner">
-          <div class="brand-mark rounded-circle bg-body-secondary d-flex align-items-center justify-content-center fw-semibold" style="width:2.5rem;height:2.5rem;">◎</div>
+          <div class="rounded-circle bg-body-secondary d-flex align-items-center justify-content-center fw-semibold" style="width:2.5rem;height:2.5rem;">◎</div>
           <div class="brand-copy markdown-body m-0" data-copy="brand"></div>
         </div>
         <div class="d-flex align-items-center gap-2 ms-lg-auto">
@@ -53,7 +53,7 @@
       <div class="container-xl d-flex flex-column gap-3 align-items-center" id="conversation-inner"></div>
     </main>
 
-    <footer class="composer border-top bg-body py-3" aria-label="Message composer">
+    <footer class="border-top bg-body py-3" aria-label="Message composer">
       <div class="container-xl">
         <form id="composer-form" class="d-grid gap-2">
           <label for="user-input" class="visually-hidden">Write your message</label>
@@ -68,7 +68,7 @@
   </div>
 
   <template id="message-template">
-    <article class="message message-row w-100" style="max-width: 960px;" aria-live="polite">
+    <article class="message w-100" style="max-width: 960px;" aria-live="polite">
       <div class="d-flex gap-3 align-items-start">
         <div class="avatar rounded-circle d-flex align-items-center justify-content-center fw-semibold bg-secondary-subtle text-secondary-emphasis" style="width:2.5rem;height:2.5rem;" aria-hidden="true"></div>
         <div class="card border-0 shadow-sm flex-grow-1">
