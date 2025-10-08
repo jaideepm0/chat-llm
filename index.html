@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat with OpenAI</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown.min.css">
+  <!-- PrismJS syntax highlight (light + dark, toggled via JS) -->
+  <link id="prism-light" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism.min.css">
+  <link id="prism-dark" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1/themes/prism-okaidia.min.css" disabled>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --content-max: 1100px;
+      --avatar-size: 2.5rem;
+      --shadow: 0 0.125rem 0.5rem rgba(0,0,0,.08);
+    }
+
+    body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
+
+    /* Constrain readable content width uniformly */
+    .content-max { max-width: var(--content-max); }
+    .message { max-width: var(--content-max); }
+
+    /* Tighter, uniform header */
+    header .brand-icon {
+      width: var(--avatar-size);
+      height: var(--avatar-size);
+    }
+
+    /* Card + message look consistent across themes */
+    .card { box-shadow: var(--shadow); }
+    .card-body { padding: .75rem 1rem !important; }
+
+    .avatar {
+      width: var(--avatar-size);
+      height: var(--avatar-size);
+    }
+
+    /* Details dropdown spacing */
+    details.settings summary {
+      list-style: none;
+    }
+    details.settings[open] summary { opacity: .9; }
+
+    /* Markdown body inside cards keeps consistent spacing */
+    .message-content.markdown-body { padding: 0; }
+    .empty-state .markdown-body { max-width: var(--content-max); }
+
+    /* Code blocks should scroll horizontally without breaking layout */
+    pre { overflow: auto; }
+    pre code { white-space: pre; }
+
+    /* Make Markdown backgrounds blend with app theme */
+    .markdown-body { background: transparent !important; color: inherit; }
+    .markdown-body pre { background-color: var(--bs-tertiary-bg) !important; border: 1px solid var(--bs-border-color); border-radius: .5rem; padding: .75rem; position: relative; }
+    .markdown-body code { background-color: var(--bs-tertiary-bg); color: inherit; }
+    /* Keep Prism output blending with background */
+    .markdown-body code[class*="language-"],
+    .markdown-body pre[class*="language-"] { background: transparent !important; color: inherit; }
+    .markdown-body blockquote { color: var(--bs-secondary-color); border-left: .25rem solid var(--bs-border-color); }
+    /* Settings drawer */
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.3); opacity: 0; pointer-events: none; transition: opacity .2s; }
+    .drawer { position: fixed; inset: 0 auto 0 0; width: min(90vw, 420px); background: var(--bs-body-bg); border-right: 1px solid var(--bs-border-color); transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow); overflow: auto; }
+    .drawer.open { transform: translateX(0); }
+    .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
+    .drawer .drawer-header { position: sticky; top: 0; background: inherit; z-index: 2; }
+    /* Copy button for code blocks */
+    .copy-btn {
+      position: absolute;
+      top: .5rem;
+      right: .5rem;
+      z-index: 1;
+      opacity: .85;
+      transition: opacity .15s ease-in-out;
+    }
+    pre:hover .copy-btn { opacity: 1; }
+
+    /* Compact spacing overall */
+    header, footer { padding-top: .5rem !important; padding-bottom: .5rem !important; }
+    .message .message-metadata { margin-bottom: .25rem !important; }
+    #user-input { min-height: 44px; }
+  </style>
+</head>
+<body class="bg-body text-body">
+  <div class="app d-flex flex-column min-vh-100 w-100">
+    <header class="py-2 border-bottom bg-body-tertiary">
+      <div class="container-xl d-flex flex-column flex-lg-row align-items-lg-center justify-content-between gap-3">
+        <div class="d-flex align-items-center gap-3" role="banner">
+          <div class="brand-icon rounded-circle bg-body-secondary d-flex align-items-center justify-content-center fw-semibold" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+          </div>
+          <div class="brand-copy markdown-body m-0" data-copy="brand"></div>
+        </div>
+        <div class="d-flex align-items-center gap-2 ms-lg-auto">
+          <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" id="theme-toggle" aria-live="polite" title="Toggle theme" aria-label="Toggle theme">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+            <span class="d-none d-sm-inline">Theme</span>
+          </button>
+          <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" id="settings-open" aria-label="Open settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 3.6 15a1.65 1.65 0 0 0-1.51-1H2a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 3.6 8a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 8 3.6a1.65 1.65 0 0 0 1-1.51V2a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 3.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 20.4 8a1.65 1.65 0 0 0 1.51 1H22a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <span class="d-none d-sm-inline">Settings</span>
+          </button>
+        </div>
+      </div>
+  </header>
+
+    <div class="drawer-backdrop" id="drawer-backdrop" hidden></div>
+    <aside class="drawer" id="settings-drawer" aria-label="Settings drawer" aria-hidden="true">
+      <div class="drawer-header border-bottom p-3 d-flex justify-content-between align-items-center">
+        <h2 class="h6 m-0">Settings</h2>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="settings-close" aria-label="Close settings">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="p-3">
+        <form id="settings-form" class="d-grid gap-3" autocomplete="off">
+          <div class="d-grid gap-1">
+            <label class="form-label small fw-semibold" for="api-key">OpenAI API key</label>
+            <input type="password" class="form-control form-control-sm" id="api-key" name="apiKey" placeholder="sk-..." autocomplete="off" required>
+            <div class="markdown-body form-text" data-copy="helper"></div>
+          </div>
+          <div class="d-grid gap-1">
+            <label class="form-label small fw-semibold" for="model">Model</label>
+            <select id="model" name="model" class="form-select form-select-sm">
+              <optgroup label="GPT-5 family">
+                <option value="gpt-5">gpt-5</option>
+                <option value="gpt-5-mini">gpt-5-mini</option>
+                <option value="gpt-5-nano">gpt-5-nano</option>
+              </optgroup>
+              <optgroup label="o-series">
+                <option value="o3">o3</option>
+                <option value="o3-mini">o3-mini</option>
+                <option value="o3-pro">o3-pro</option>
+                <option value="o4-mini">o4-mini</option>
+              </optgroup>
+              <optgroup label="GPT-4.1 family">
+                <option value="gpt-4.1">gpt-4.1</option>
+                <option value="gpt-4.1-mini" selected>gpt-4.1-mini</option>
+                <option value="gpt-4.1-nano">gpt-4.1-nano</option>
+              </optgroup>
+            </select>
+          </div>
+          <div class="d-grid gap-1">
+            <label class="form-label small fw-semibold" for="temperature">Temperature</label>
+            <input type="number" class="form-control form-control-sm" id="temperature" name="temperature" min="0" max="2" step="0.1" value="1.0">
+          </div>
+          <button type="submit" class="btn btn-dark btn-sm w-auto d-inline-flex align-items-center gap-2" aria-label="Save settings">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>
+            Save
+          </button>
+        </form>
+      </div>
+    </aside>
+
+    <main id="conversation" class="flex-grow-1 overflow-auto py-3" role="log" aria-live="polite" aria-label="Chat conversation">
+      <div class="container-xl d-flex flex-column gap-3 align-items-center" id="conversation-inner">
+        <form id="system-form" class="w-100 content-max">
+          <div class="card border-0 shadow-sm">
+            <div class="card-body p-2">
+              <label for="system-prompt-ui" class="form-label small fw-semibold mb-1">System prompt</label>
+              <div class="d-flex gap-2 align-items-start">
+                <textarea id="system-prompt-ui" class="form-control form-control-sm" rows="2" placeholder="You are a helpful assistant."></textarea>
+                <button type="submit" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" aria-label="Apply system prompt">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+                  Apply
+                </button>
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <footer class="border-top bg-body py-2" aria-label="Message composer">
+      <div class="container-xl">
+        <form id="composer-form" class="d-grid gap-2">
+          <label for="user-input" class="visually-hidden">Write your message</label>
+          <div class="input-group">
+            <textarea id="user-input" class="form-control" name="message" placeholder="Send a message" rows="1" required></textarea>
+            <button type="submit" class="btn btn-dark d-inline-flex align-items-center gap-2" id="send-button" aria-label="Send message">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+              <span class="d-none d-sm-inline">Send</span>
+            </button>
+          </div>
+          <div class="markdown-body small text-body-secondary" data-copy="composer"></div>
+        </form>
+      </div>
+    </footer>
+  </div>
+
+  <template id="message-template">
+    <article class="message w-100 content-max" aria-live="polite">
+      <div class="d-flex gap-3 align-items-start">
+        <div class="avatar rounded-circle d-flex align-items-center justify-content-center fw-semibold bg-secondary-subtle text-secondary-emphasis" aria-hidden="true"></div>
+        <div class="card border-0 shadow-sm flex-grow-1">
+          <div class="card-body p-3">
+            <div class="message-metadata d-flex gap-2 small text-body-secondary mb-2">
+              <span class="role"></span>
+              <span class="status" hidden></span>
+            </div>
+            <div class="message-content markdown-body mb-0"></div>
+          </div>
+        </div>
+      </div>
+    </article>
+  </template>
+
+  <script type="text/markdown" id="copy-inline">
+[brand]
+**OpenAI Chat**
+
+Talk with the OpenAI chat.completions API.
+[/brand]
+
+[helper]
+_Key is kept only for this browser session. Provide it again whenever you reload._
+[/helper]
+
+[composer]
+_Shift + Enter inserts a new line. You can paste code snippets or Markdown for better formatting._
+[/composer]
+
+[empty]
+# Talk to LLM through API by simple configuration.
+
+Quick start:
+- Set OPENAI_API_KEY in your environment or paste it in the session helper.
+- Choose model, temperature, and max tokens in the configuration.
+- Send a chat message and receive the completion (supports streaming).
+
+Example curl:
+```bash
+curl https://api.openai.com/v1/chat/completions \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Say hello"}]}'
+```
+
+Tips:
+- Use lower temperature (0.0-0.3) for deterministic outputs.
+- Use system messages for high-level instructions and behavior.
+
+[/empty]
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- PrismJS core and selected languages -->
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/prism.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-python.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-markdown.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-javascript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/prismjs@1/components/prism-typescript.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="script.js" defer></script>
+</body>
+</html>
