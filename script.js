@@ -15,6 +15,8 @@
     settingsCloseBtn: document.getElementById('settings-close'),
     systemForm: document.getElementById('system-form'),
     systemPromptUI: document.getElementById('system-prompt-ui'),
+    systemStatus: document.getElementById('system-status'),
+    systemCard: document.getElementById('system-card'),
     brandCopy: document.querySelector('[data-copy="brand"]'),
     helperCopy: document.querySelector('[data-copy="helper"]'),
     composerHint: document.querySelector('[data-copy="composer"]'),
@@ -75,6 +77,10 @@ Tips:
   })();
 
   const THEME_KEY = 'chat_theme_preference';
+  const COMPOSER_MAX_HEIGHT = 320;
+  const STORAGE_KEYS = {
+    systemPrompt: 'chat_system_prompt',
+  };
   const PRISM_LIGHT_ID = 'prism-light';
   const PRISM_DARK_ID = 'prism-dark';
 
@@ -346,6 +352,10 @@ Tips:
 
     const container = dom.conversationInner || dom.conversation;
     container.appendChild(fragment);
+    // smooth appear
+    requestAnimationFrame(() => {
+      messageEl.classList.add('appear');
+    });
     scrollConversationToBottom();
     updateEmptyState();
     return messageEl;
@@ -462,8 +472,8 @@ Tips:
     try {
       const requestBody = {
         model,
-        // Prepend system prompt if provided
-        messages: state.settings.systemPrompt?.trim()
+        // Prepend system prompt if non-empty
+        messages: (state.settings.systemPrompt?.trim())
           ? [{ role: 'system', content: state.settings.systemPrompt.trim() }, ...state.history]
           : [...state.history]
       };
@@ -474,6 +484,9 @@ Tips:
       // Streaming fetch
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
+        cache: 'no-store',
+        credentials: 'omit',
+        referrerPolicy: 'no-referrer',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`
@@ -567,25 +580,24 @@ Tips:
     applyModelAffordances();
   }
 
-  function handleSystemSubmit(event) {
-    event.preventDefault();
-    const val = (dom.systemPromptUI?.value || '').trim();
-    state.settings.systemPrompt = val;
-    if (dom.systemForm) {
-      const btn = dom.systemForm.querySelector('button[type="submit"]');
-      if (btn) {
-        const prev = btn.innerHTML;
-        btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg> Applied';
-        btn.classList.remove('btn-outline-secondary');
-        btn.classList.add('btn-success');
-        setTimeout(() => {
-          btn.innerHTML = prev;
-          btn.classList.add('btn-outline-secondary');
-          btn.classList.remove('btn-success');
-        }, 1000);
-      }
-    }
+// No explicit submit/apply; presence of text decides application
+
+function updateSystemUI() {
+  const hasPrompt = !!state.settings.systemPrompt?.trim();
+  // Badge
+  if (dom.systemStatus) {
+    dom.systemStatus.textContent = hasPrompt ? 'Applied' : '';
+    dom.systemStatus.hidden = !hasPrompt;
+    dom.systemStatus.classList.toggle('show', hasPrompt);
+    dom.systemStatus.classList.toggle('text-bg-success', hasPrompt);
+    dom.systemStatus.classList.toggle('text-bg-secondary', !hasPrompt);
   }
+  // Card border
+  if (dom.systemCard) {
+    dom.systemCard.classList.toggle('border-success', hasPrompt);
+    dom.systemCard.classList.toggle('border-2', hasPrompt);
+  }
+}
 
   function openSettingsDrawer() {
     dom.settingsDrawer?.classList.add('open');
@@ -604,9 +616,25 @@ Tips:
   function autoResizeTextarea() {
     const textarea = dom.userInput;
     textarea.style.height = 'auto';
-    const maxHeight = 240;
-    textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+    textarea.style.height = `${Math.min(textarea.scrollHeight, COMPOSER_MAX_HEIGHT)}px`;
   }
+
+  function autoResizeSystemPrompt() {
+    const ta = dom.systemPromptUI;
+    if (!ta) return;
+    ta.style.height = 'auto';
+    const max = 400;
+    ta.style.height = `${Math.min(ta.scrollHeight, max)}px`;
+  }
+
+  function handleSystemInput() {
+    const val = (dom.systemPromptUI?.value || '').trim();
+    state.settings.systemPrompt = val;
+    storage?.setItem(STORAGE_KEYS.systemPrompt, state.settings.systemPrompt);
+    updateSystemUI();
+  }
+
+  // updateSystemStatusBadge merged into updateSystemUI()
 
   function handleComposerInput() {
     autoResizeTextarea();
@@ -627,6 +655,17 @@ Tips:
     applyCopy();
     loadCopy();
     autoResizeTextarea();
+    autoResizeSystemPrompt();
+
+    // restore persisted system prompt
+    try {
+      const persistedPrompt = storage?.getItem(STORAGE_KEYS.systemPrompt);
+      if (persistedPrompt) {
+        state.settings.systemPrompt = persistedPrompt;
+        if (dom.systemPromptUI) dom.systemPromptUI.value = persistedPrompt;
+      }
+    } catch (_) {}
+    updateSystemUI();
 
     if (dom.themeToggle) {
       dom.themeToggle.addEventListener('click', handleThemeToggle);
@@ -637,12 +676,14 @@ Tips:
     dom.userInput.addEventListener('keydown', handleComposerKeydown);
     dom.settingsForm.addEventListener('submit', handleSettingsSubmit);
     dom.modelSelect.addEventListener('change', applyModelAffordances);
-    dom.systemForm?.addEventListener('submit', handleSystemSubmit);
+    // Prevent system form submit to avoid page reload
+    dom.systemForm && dom.systemForm.addEventListener('submit', (e) => e.preventDefault());
     dom.systemPromptUI && (dom.systemPromptUI.value = state.settings.systemPrompt || '');
+    dom.systemPromptUI && dom.systemPromptUI.addEventListener('input', autoResizeSystemPrompt);
+    dom.systemPromptUI && dom.systemPromptUI.addEventListener('input', handleSystemInput);
     dom.settingsOpenBtn?.addEventListener('click', openSettingsDrawer);
     dom.settingsCloseBtn?.addEventListener('click', closeSettingsDrawer);
     dom.drawerBackdrop?.addEventListener('click', closeSettingsDrawer);
-
     handleComposerInput();
     applyModelAffordances();
   }

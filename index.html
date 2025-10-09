@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#06b6d4">
   <title>Chat with OpenAI</title>
+  <link rel="icon" type="image/svg+xml" href="favicon.svg">
+  <link rel="shortcut icon" type="image/svg+xml" href="favicon.svg">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/github-markdown-css@5.5.1/github-markdown.min.css">
   <!-- PrismJS syntax highlight (light + dark, toggled via JS) -->
@@ -17,6 +21,10 @@
       --content-max: 1100px;
       --avatar-size: 2.5rem;
       --shadow: 0 0.125rem 0.5rem rgba(0,0,0,.08);
+      --anim-fast: .18s ease;
+      --anim-med: .24s ease;
+      --brand-grad-start: #06b6d4;
+      --brand-grad-end: #7c3aed;
     }
 
     body { font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
@@ -63,8 +71,8 @@
     .markdown-body pre[class*="language-"] { background: transparent !important; color: inherit; }
     .markdown-body blockquote { color: var(--bs-secondary-color); border-left: .25rem solid var(--bs-border-color); }
     /* Settings drawer */
-    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.3); opacity: 0; pointer-events: none; transition: opacity .2s; }
-    .drawer { position: fixed; inset: 0 auto 0 0; width: min(90vw, 420px); background: var(--bs-body-bg); border-right: 1px solid var(--bs-border-color); transform: translateX(-100%); transition: transform .2s; box-shadow: var(--shadow); overflow: auto; }
+    .drawer-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.3); opacity: 0; pointer-events: none; transition: opacity var(--anim-med); }
+    .drawer { position: fixed; inset: 0 auto 0 0; width: min(90vw, 420px); background: var(--bs-body-bg); border-right: 1px solid var(--bs-border-color); transform: translateX(-100%); transition: transform var(--anim-med); box-shadow: var(--shadow); overflow: auto; }
     .drawer.open { transform: translateX(0); }
     .drawer-backdrop.open { opacity: 1; pointer-events: auto; }
     .drawer .drawer-header { position: sticky; top: 0; background: inherit; z-index: 2; }
@@ -83,6 +91,24 @@
     header, footer { padding-top: .5rem !important; padding-bottom: .5rem !important; }
     .message .message-metadata { margin-bottom: .25rem !important; }
     #user-input { min-height: 44px; }
+
+    /* Smooth message appearance */
+    .message { opacity: 0; transform: translateY(4px); transition: opacity var(--anim-fast), transform var(--anim-fast); }
+    .message.appear { opacity: 1; transform: none; }
+
+    /* Allow textareas to be easily resized */
+    textarea.form-control { resize: vertical; }
+
+    /* Composer layout: keep Send button fixed size */
+    .composer-row { align-items: flex-end; }
+    #send-button { white-space: nowrap; }
+
+    /* System status badge subtle transition */
+    .system-status { opacity: 0; transition: opacity var(--anim-fast); }
+    .system-status.show { opacity: 1; }
+
+    /* Brand icon gradient + white glyph */
+    .brand-icon { background: linear-gradient(135deg, var(--brand-grad-start), var(--brand-grad-end)) !important; color: #fff; }
   </style>
 </head>
 <body class="bg-body text-body">
@@ -120,7 +146,7 @@
         <form id="settings-form" class="d-grid gap-3" autocomplete="off">
           <div class="d-grid gap-1">
             <label class="form-label small fw-semibold" for="api-key">OpenAI API key</label>
-            <input type="password" class="form-control form-control-sm" id="api-key" name="apiKey" placeholder="sk-..." autocomplete="off" required>
+            <input type="password" class="form-control form-control-sm" id="api-key" name="apiKey" placeholder="sk-..." autocomplete="off" autocapitalize="none" spellcheck="false" inputmode="text" required>
             <div class="markdown-body form-text" data-copy="helper"></div>
           </div>
           <div class="d-grid gap-1">
@@ -159,15 +185,14 @@
     <main id="conversation" class="flex-grow-1 overflow-auto py-3" role="log" aria-live="polite" aria-label="Chat conversation">
       <div class="container-xl d-flex flex-column gap-3 align-items-center" id="conversation-inner">
         <form id="system-form" class="w-100 content-max">
-          <div class="card border-0 shadow-sm">
+          <div id="system-card" class="card shadow-sm border">
             <div class="card-body p-2">
-              <label for="system-prompt-ui" class="form-label small fw-semibold mb-1">System prompt</label>
+              <div class="d-flex justify-content-between align-items-center mb-1">
+                <label for="system-prompt-ui" class="form-label small fw-semibold mb-0">System prompt</label>
+                <span id="system-status" class="badge text-bg-secondary system-status" hidden>Applied</span>
+              </div>
               <div class="d-flex gap-2 align-items-start">
                 <textarea id="system-prompt-ui" class="form-control form-control-sm" rows="2" placeholder="You are a helpful assistant."></textarea>
-                <button type="submit" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" aria-label="Apply system prompt">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
-                  Apply
-                </button>
               </div>
             </div>
           </div>
@@ -179,8 +204,8 @@
       <div class="container-xl">
         <form id="composer-form" class="d-grid gap-2">
           <label for="user-input" class="visually-hidden">Write your message</label>
-          <div class="input-group">
-            <textarea id="user-input" class="form-control" name="message" placeholder="Send a message" rows="1" required></textarea>
+          <div class="composer-row d-flex gap-2">
+            <textarea id="user-input" class="form-control flex-grow-1" name="message" placeholder="Send a message" rows="1" required></textarea>
             <button type="submit" class="btn btn-dark d-inline-flex align-items-center gap-2" id="send-button" aria-label="Send message">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
               <span class="d-none d-sm-inline">Send</span>
@@ -213,7 +238,7 @@
 [brand]
 **OpenAI Chat**
 
-Talk with the OpenAI chat.completions API.
+Talk with the OpenAI chat.completions API. Default model: `gpt-4.1-mini`.
 [/brand]
 
 [helper]
