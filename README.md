@@ -1,44 +1,98 @@
-# Chat LLM (OpenAI Chat UI)
+# Chat LLM (GitHub Pages–compatible)
 
-A lightweight, single‑page web app to chat with OpenAI's `chat.completions` API. It runs fully client‑side, supports streaming responses, theming, etc...
-
-Default model: `gpt-4.1-mini`.
+A fully static, single-page chat UI that talks to OpenAI via `POST /v1/responses` (streaming). Designed to work on GitHub Pages (no backend, no build step).
 
 ## Features
-- Streaming chat via `https://api.openai.com/v1/chat/completions`
-- Model and temperature controls
-- System prompt editor; prompt is applied automatically when non‑empty with clear visual indication
-- Smooth message appearance animations and tidy UI
-- Light/Dark theme toggle with Prism code highlighting
-- Copy‑to‑clipboard buttons on code blocks
-- Markdown rendering with sanitization (DOMPurify)
 
-## Quick Start
-- Open `index.html` in a browser (or serve the folder statically).
-- Click Settings (top right) and paste your OpenAI API key (`sk-...`).
-- Leave the default model as `gpt-4.1-mini` or select another.
-- Optionally set temperature.
-- Type a message and hit Enter to send (Shift+Enter for a new line).
+- Responses API streaming (`text/event-stream`)
+- ChatGPT-like sidebar with chat history (pin, delete) + multi-chat persistence
+- Command palette / search (`Ctrl+K`) for chats + actions
+- ChatGPT-style model picker (curated list + optional `GET /v1/models` refresh)
+- Reasoning controls (effort + readable reasoning summaries)
+- Optional Web Search tool with clickable citations
+- Optional local tools (calculator + time) via function calling
+- Optional usage + cost estimate per response (requires `store: true`)
+- Stop, regenerate, edit user messages, export chat JSON, light/dark theme
 
-Note: Your API key is only used in this session within your browser tab and is not persisted to disk by the app.
+## Run it
 
-## System Prompt
-- Edit the system prompt at the top of the conversation.
-- If non‑empty, it is applied to the next requests automatically.
-- The UI shows an “Applied” badge and a green border when active. Text persists across reloads.
+- GitHub Pages: enable Pages for the repo root.
+- Local dev: run a static server (recommended so `content.md` can be fetched): `python3 -m http.server 8000` then open `http://localhost:8000`.
 
-## Example curl
-```bash
-curl https://api.openai.com/v1/chat/completions \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"model":"gpt-4.1-mini","messages":[{"role":"user","content":"Say hello"}]}'
-```
+## OpenAI API
 
-## Development Notes
-- No build step required; all dependencies are loaded from CDNs.
-- `script.js` handles UI state, streaming, sanitization, and rendering.
-- The app uses smooth scrolling and small UI transitions for a polished feel.
+- Endpoint: `POST https://api.openai.com/v1/responses`
+- Key request fields used by this app: `model`, `input`, `stream`, `max_output_tokens`, `temperature`, `reasoning`, `tools` (`web_search`)
+- Multi-turn efficiency: prefers `previous_response_id` chaining (falls back to full history if chaining fails)
+- Optional: supports Responses API function tools (local calculator + time)
 
-## License
-See `LICENSE` for details.
+This repo intentionally does **not** use `chat.completions`.
+
+## Code layout
+
+- `index.html`: static app shell (GitHub Pages compatible)
+- `styles.css`: small custom styles (no build step)
+- `src/app.js`: entrypoint
+- `src/ui.js`: UI + UX wiring (sidebar, modals, shortcuts)
+- `src/api.js`: `v1/responses` streaming + optional `v1/models` refresh
+- `src/state.js`: persisted store (multiple chats)
+- `src/models.js`: curated model catalog + Standard-tier pricing labels
+
+## Models & pricing (Standard tier)
+
+Prices per 1M tokens (input / cached input / output). Source of truth: `https://platform.openai.com/docs/pricing` (prices can change). Last verified: 2026-01-22.
+
+|Model|Input|Cached input|Output|
+|---|---:|---:|---:|
+|gpt-5.2|$1.75|$0.175|$14.00|
+|gpt-5.2-pro|$21.00|—|$168.00|
+|gpt-5.1|$1.25|$0.125|$10.00|
+|gpt-5|$1.25|$0.125|$10.00|
+|gpt-5-pro|$15.00|—|$120.00|
+|gpt-5-mini|$0.25|$0.025|$2.00|
+|gpt-5-nano|$0.05|$0.005|$0.40|
+|gpt-5.2-chat-latest|$1.75|$0.175|$14.00|
+|gpt-5.1-chat-latest|$1.25|$0.125|$10.00|
+|gpt-5-chat-latest|$1.25|$0.125|$10.00|
+|gpt-5.2-codex|$1.75|$0.175|$14.00|
+|gpt-5.1-codex-max|$1.25|$0.125|$10.00|
+|gpt-5.1-codex|$1.25|$0.125|$10.00|
+|gpt-5-codex|$1.25|$0.125|$10.00|
+|gpt-5.1-codex-mini|$0.25|$0.025|$2.00|
+|codex-mini-latest|$1.50|$0.375|$6.00|
+|o4-mini|$1.10|$0.275|$4.40|
+|o4-mini-deep-research|$2.00|$0.50|$8.00|
+|o3|$2.00|$0.50|$8.00|
+|o3-mini|$1.10|$0.55|$4.40|
+|o3-pro|$20.00|—|$80.00|
+|o3-deep-research|$10.00|$2.50|$40.00|
+|o1|$15.00|$7.50|$60.00|
+|o1-mini|$1.10|$0.55|$4.40|
+|o1-pro|$150.00|—|$600.00|
+|gpt-4.1|$2.00|$0.50|$8.00|
+|gpt-4.1-mini|$0.40|$0.10|$1.60|
+|gpt-4.1-nano|$0.10|$0.025|$0.40|
+|gpt-4o|$2.50|$1.25|$10.00|
+|gpt-4o-mini|$0.15|$0.075|$0.60|
+|gpt-4o-audio-preview|$2.50|—|$10.00|
+|gpt-4o-mini-audio-preview|$0.15|—|$0.60|
+|gpt-4o-realtime-preview|$5.00|—|$20.00|
+|gpt-4o-mini-realtime-preview|$0.60|—|$2.40|
+|gpt-4o-search-preview|$2.50|—|$10.00|
+|gpt-4o-mini-search-preview|$0.15|—|$0.60|
+|gpt-5-search-api|$1.25|$0.125|$10.00|
+|computer-use-preview|$3.00|—|$12.00|
+
+## Web search pricing (quick note)
+
+The web search tool is billed separately from model tokens (tool calls + search content tokens). See `https://platform.openai.com/docs/pricing` for the exact rules and exceptions.
+
+## Security (honest constraints)
+
+- Your API key is stored in `sessionStorage` (tab session only) and sent directly from the browser to OpenAI.
+- Don’t deploy this as a public, multi-user app without a backend proxy.
+- UI output is sanitized (DOMPurify) and a restrictive CSP is set via `<meta http-equiv="Content-Security-Policy">`.
+
+## Customize copy
+
+Edit `content.md` to change the landing copy and helper text.
