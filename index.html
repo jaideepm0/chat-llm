@@ -111,7 +111,7 @@
           </div>
 
           <button type="button" class="btn btn-outline-secondary btn-sm d-inline-flex align-items-center gap-1" id="model-picker-open" aria-haspopup="dialog" aria-controls="model-picker" aria-expanded="false" aria-label="Choose model">
-            <span id="active-model" class="fw-semibold text-truncate d-inline-block">gpt-5-mini</span>
+            <span id="active-model" class="fw-semibold text-truncate d-inline-block">gpt-5.4-mini</span>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>
           </button>
 
@@ -353,6 +353,12 @@
             </div>
 
             <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="top-p">Top P</label>
+              <input type="number" class="form-control form-control-sm" id="top-p" min="0" max="1" step="0.05" value="0">
+              <div class="form-text">0 means “use the API default”.</div>
+            </div>
+
+            <div class="d-grid gap-1">
               <label class="form-label small fw-semibold" for="max-output-tokens">Max output tokens</label>
               <input type="number" class="form-control form-control-sm" id="max-output-tokens" min="0" value="0">
               <div class="form-text">0 means “use the model default”.</div>
@@ -361,9 +367,12 @@
             <div class="d-grid gap-1">
               <label class="form-label small fw-semibold" for="reasoning-effort">Reasoning effort</label>
               <select id="reasoning-effort" class="form-select form-select-sm">
+                <option value="none">none</option>
+                <option value="minimal">minimal</option>
                 <option value="low">low</option>
                 <option value="medium" selected>medium</option>
                 <option value="high">high</option>
+                <option value="xhigh">xhigh</option>
               </select>
             </div>
 
@@ -377,6 +386,48 @@
               </select>
               <div class="form-text">Readable summary (not raw chain-of-thought).</div>
             </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="text-verbosity">Text verbosity</label>
+              <select id="text-verbosity" class="form-select form-select-sm">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="truncation">Context truncation</label>
+              <select id="truncation" class="form-select form-select-sm">
+                <option value="disabled" selected>disabled</option>
+                <option value="auto">auto</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="max-tool-calls">Max tool calls</label>
+              <input type="number" class="form-control form-control-sm" id="max-tool-calls" min="0" step="1" value="0">
+              <div class="form-text">0 means “no explicit cap”.</div>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="prompt-cache-key">Prompt cache key</label>
+              <input id="prompt-cache-key" class="form-control form-control-sm" maxlength="64" placeholder="stable-user-or-workspace-key" autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="prompt-cache-retention">Prompt cache retention</label>
+              <select id="prompt-cache-retention" class="form-select form-select-sm">
+                <option value="" selected>API default</option>
+                <option value="24h">24h</option>
+                <option value="in_memory">in_memory</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="safety-identifier">Safety identifier</label>
+              <input id="safety-identifier" class="form-control form-control-sm" maxlength="64" placeholder="anonymous-user-hash" autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
           </section>
 
           <section id="settings-tools" class="d-grid gap-2">
@@ -389,6 +440,33 @@
               <label class="form-label small fw-semibold" for="web-search-domains">Web search allowed domains (optional)</label>
               <input id="web-search-domains" class="form-control form-control-sm" placeholder="example.com, docs.example.org" autocomplete="off" autocapitalize="none" spellcheck="false">
               <div class="form-text">Limits search results to these domains.</div>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="web-search-blocked-domains">Web search blocked domains (optional)</label>
+              <input id="web-search-blocked-domains" class="form-control form-control-sm" placeholder="spam.example, lowquality.example" autocomplete="off" autocapitalize="none" spellcheck="false">
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="web-search-context-size">Web search context size</label>
+              <select id="web-search-context-size" class="form-select form-select-sm">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+            </div>
+
+            <div class="d-grid gap-1">
+              <label class="form-label small fw-semibold" for="web-search-return-token-budget">Web search token budget</label>
+              <select id="web-search-return-token-budget" class="form-select form-select-sm">
+                <option value="default" selected>default</option>
+                <option value="unlimited">unlimited</option>
+              </select>
+            </div>
+
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="web-search-live-access" checked>
+              <label class="form-check-label" for="web-search-live-access">Allow external web access</label>
             </div>
 
             <div class="form-check">

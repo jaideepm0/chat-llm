@@ -1,7 +1,10 @@
-export function configureMarkdown() {
-  if (!window.marked) return;
+import { escapeHtml } from './utils.js';
 
-  const renderer = new window.marked.Renderer();
+export function configureMarkdown() {
+  const w = globalThis.window;
+  if (!w?.marked) return;
+
+  const renderer = new w.marked.Renderer();
   const originalLink = renderer.link;
 
   renderer.link = function linkRenderer(href, title, text) {
@@ -31,7 +34,7 @@ export function configureMarkdown() {
     return originalCode.call(this, code, lang, escaped);
   };
 
-  window.marked.setOptions({
+  w.marked.setOptions({
     breaks: true,
     gfm: true,
     mangle: false,
@@ -41,9 +44,10 @@ export function configureMarkdown() {
 }
 
 export function renderMarkdown(text) {
-  if (!window.marked || !window.DOMPurify) return String(text || '');
-  const raw = window.marked.parse(String(text || ''));
-  return window.DOMPurify.sanitize(raw, {
+  const w = globalThis.window;
+  if (!w?.marked || !w?.DOMPurify) return escapeHtml(text || '');
+  const raw = w.marked.parse(String(text || ''));
+  return w.DOMPurify.sanitize(raw, {
     USE_PROFILES: { html: true },
     ADD_TAGS: ['details', 'summary'],
     ADD_ATTR: ['open'],

@@ -1,11 +1,22 @@
 // Prices from https://platform.openai.com/docs/pricing (Standard tier, per 1M tokens).
-export const DEFAULT_MODEL = 'gpt-5-mini';
+export const DEFAULT_MODEL = 'gpt-5.4-mini';
 
 export const MODEL_CATALOG = [
   {
+    group: 'GPT‑5.5 / GPT‑5.4',
+    models: [
+      { id: 'gpt-5.5', title: 'GPT‑5.5', blurb: 'Latest flagship model.', pricing: { in: 5.0, cached: 0.5, out: 30.0 } },
+      { id: 'gpt-5.5-pro', title: 'GPT‑5.5 Pro', blurb: 'Highest-quality GPT‑5.5 tier.', pricing: { in: 30.0, cached: null, out: 180.0 } },
+      { id: 'gpt-5.4', title: 'GPT‑5.4', blurb: 'Strong current-generation model.', pricing: { in: 2.5, cached: 0.25, out: 15.0 } },
+      { id: 'gpt-5.4-mini', title: 'GPT‑5.4 mini', blurb: 'Balanced default for cost and capability.', pricing: { in: 0.75, cached: 0.075, out: 4.5 } },
+      { id: 'gpt-5.4-nano', title: 'GPT‑5.4 nano', blurb: 'Lowest-cost GPT‑5.4 tier.', pricing: { in: 0.2, cached: 0.02, out: 1.25 } },
+      { id: 'gpt-5.4-pro', title: 'GPT‑5.4 Pro', blurb: 'Highest-quality GPT‑5.4 tier.', pricing: { in: 30.0, cached: null, out: 180.0 } },
+    ],
+  },
+  {
     group: 'GPT‑5',
     models: [
-      { id: 'gpt-5.2', title: 'GPT‑5.2', blurb: 'Newest flagship model.', pricing: { in: 1.75, cached: 0.175, out: 14.0 } },
+      { id: 'gpt-5.2', title: 'GPT‑5.2', blurb: 'Previous GPT‑5.2 flagship.', pricing: { in: 1.75, cached: 0.175, out: 14.0 } },
       { id: 'gpt-5.2-pro', title: 'GPT‑5.2 Pro', blurb: 'Highest-quality GPT‑5.2 tier.', pricing: { in: 21.0, cached: null, out: 168.0 } },
       { id: 'gpt-5.1', title: 'GPT‑5.1', blurb: 'Strong general model.', pricing: { in: 1.25, cached: 0.125, out: 10.0 } },
       { id: 'gpt-5', title: 'GPT‑5', blurb: 'General reasoning + tools.', pricing: { in: 1.25, cached: 0.125, out: 10.0 } },
@@ -80,8 +91,8 @@ export const MODEL_CATALOG = [
     group: 'Search',
     models: [
       { id: 'gpt-5-search-api', title: 'GPT‑5 Search API', blurb: 'Search-specialized model.', pricing: { in: 1.25, cached: 0.125, out: 10.0 } },
-      { id: 'gpt-4o-search-preview', title: 'GPT‑4o search preview', blurb: 'Search preview model.', pricing: { in: 2.5, cached: null, out: 10.0 } },
-      { id: 'gpt-4o-mini-search-preview', title: 'GPT‑4o mini search preview', blurb: 'Cheaper search preview.', pricing: { in: 0.15, cached: null, out: 0.6 } },
+      { id: 'gpt-4o-search-preview', title: 'GPT‑4o search preview', blurb: 'Deprecated search preview; use Responses web_search.', deprecated: 'Shuts down 2026-07-23.', pricing: { in: 2.5, cached: null, out: 10.0 } },
+      { id: 'gpt-4o-mini-search-preview', title: 'GPT‑4o mini search preview', blurb: 'Deprecated search preview; use Responses web_search.', deprecated: 'Shuts down 2026-07-23.', pricing: { in: 0.15, cached: null, out: 0.6 } },
     ],
   },
   {

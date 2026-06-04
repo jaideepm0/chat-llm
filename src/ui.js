@@ -83,11 +83,22 @@ const dom = {
   apiBaseUrlInput: document.getElementById('api-base-url'),
   testConnectionBtn: document.getElementById('test-connection'),
   temperatureInput: document.getElementById('temperature'),
+  topPInput: document.getElementById('top-p'),
   maxOutputTokensInput: document.getElementById('max-output-tokens'),
   reasoningEffortSelect: document.getElementById('reasoning-effort'),
   reasoningSummarySelect: document.getElementById('reasoning-summary'),
+  textVerbositySelect: document.getElementById('text-verbosity'),
+  truncationSelect: document.getElementById('truncation'),
+  maxToolCallsInput: document.getElementById('max-tool-calls'),
+  promptCacheKeyInput: document.getElementById('prompt-cache-key'),
+  promptCacheRetentionSelect: document.getElementById('prompt-cache-retention'),
+  safetyIdentifierInput: document.getElementById('safety-identifier'),
   webSearchCheckbox: document.getElementById('web-search'),
   webSearchDomainsInput: document.getElementById('web-search-domains'),
+  webSearchBlockedDomainsInput: document.getElementById('web-search-blocked-domains'),
+  webSearchContextSizeSelect: document.getElementById('web-search-context-size'),
+  webSearchExternalAccessCheckbox: document.getElementById('web-search-live-access'),
+  webSearchReturnTokenBudgetSelect: document.getElementById('web-search-return-token-budget'),
   localToolsCheckbox: document.getElementById('local-tools'),
   storeCheckbox: document.getElementById('store'),
   instructionsTextarea: document.getElementById('instructions'),
@@ -377,6 +388,18 @@ function updateHeader() {
   renderWorkspaceSummary();
 }
 
+function modeLabelForEffort(effort) {
+  if (effort === 'high' || effort === 'xhigh') return 'Thinking';
+  if (effort === 'none' || effort === 'minimal' || effort === 'low') return 'Instant';
+  return 'Auto';
+}
+
+function effortForMode(mode) {
+  if (mode === 'thinking') return 'high';
+  if (mode === 'instant') return 'low';
+  return 'medium';
+}
+
 function renderWorkspaceSummary() {
   const chat = getActiveChat();
   const chats = listChats();
@@ -389,8 +412,7 @@ function renderWorkspaceSummary() {
   if (dom.workspaceModel) dom.workspaceModel.textContent = chat?.model || store.defaults.model || DEFAULT_MODEL;
   if (dom.workspaceMessageCount) dom.workspaceMessageCount.textContent = String(chat?.messages?.length || 0);
 
-  const effort = store.defaults.reasoningEffort || 'medium';
-  const mode = effort === 'high' ? 'Thinking' : effort === 'low' ? 'Instant' : 'Auto';
+  const mode = modeLabelForEffort(store.defaults.reasoningEffort || 'medium');
   if (dom.workspaceMode) dom.workspaceMode.textContent = mode;
   if (dom.composerModeToggle) dom.composerModeToggle.textContent = `Mode: ${mode}`;
 
@@ -415,9 +437,9 @@ function applyWorkspacePreset(name) {
 }
 
 function cycleComposerMode() {
-  const current = store.defaults.reasoningEffort || 'medium';
-  const next = current === 'low' ? 'medium' : current === 'medium' ? 'high' : 'low';
-  patchDefaults({ reasoningEffort: next });
+  const currentMode = modeLabelForEffort(store.defaults.reasoningEffort || 'medium').toLowerCase();
+  const nextMode = currentMode === 'instant' ? 'auto' : currentMode === 'auto' ? 'thinking' : 'instant';
+  patchDefaults({ reasoningEffort: effortForMode(nextMode) });
   applyStateToSettingsUI();
 }
 
@@ -444,7 +466,7 @@ async function runClockWidget() {
   try {
     const out = await runLocalToolCall({
       name: 'get_current_time',
-      argumentsJson: JSON.stringify(timeZone ? { time_zone: timeZone } : {}),
+      argumentsJson: JSON.stringify({ time_zone: timeZone || null }),
     });
     if (dom.toolTimezoneOutput) dom.toolTimezoneOutput.textContent = out;
   } catch (error) {
@@ -747,11 +769,22 @@ function applyStateToSettingsUI() {
   dom.apiKeyInput.value = getApiKey();
   if (dom.apiBaseUrlInput) dom.apiBaseUrlInput.value = store.defaults.apiBaseUrl || 'https://api.openai.com';
   dom.temperatureInput.value = String(store.defaults.temperature ?? 1.0);
+  if (dom.topPInput) dom.topPInput.value = String(store.defaults.topP ?? 0);
   dom.maxOutputTokensInput.value = String(store.defaults.maxOutputTokens ?? 0);
   dom.reasoningEffortSelect.value = store.defaults.reasoningEffort || 'medium';
   dom.reasoningSummarySelect.value = store.defaults.reasoningSummary || 'auto';
+  if (dom.textVerbositySelect) dom.textVerbositySelect.value = store.defaults.textVerbosity || 'medium';
+  if (dom.truncationSelect) dom.truncationSelect.value = store.defaults.truncation || 'disabled';
+  if (dom.maxToolCallsInput) dom.maxToolCallsInput.value = String(store.defaults.maxToolCalls ?? 0);
+  if (dom.promptCacheKeyInput) dom.promptCacheKeyInput.value = store.defaults.promptCacheKey || '';
+  if (dom.promptCacheRetentionSelect) dom.promptCacheRetentionSelect.value = store.defaults.promptCacheRetention || '';
+  if (dom.safetyIdentifierInput) dom.safetyIdentifierInput.value = store.defaults.safetyIdentifier || '';
   dom.webSearchCheckbox.checked = Boolean(store.defaults.webSearch);
   if (dom.webSearchDomainsInput) dom.webSearchDomainsInput.value = store.defaults.webSearchAllowedDomains || '';
+  if (dom.webSearchBlockedDomainsInput) dom.webSearchBlockedDomainsInput.value = store.defaults.webSearchBlockedDomains || '';
+  if (dom.webSearchContextSizeSelect) dom.webSearchContextSizeSelect.value = store.defaults.webSearchContextSize || 'medium';
+  if (dom.webSearchExternalAccessCheckbox) dom.webSearchExternalAccessCheckbox.checked = store.defaults.webSearchExternalAccess !== false;
+  if (dom.webSearchReturnTokenBudgetSelect) dom.webSearchReturnTokenBudgetSelect.value = store.defaults.webSearchReturnTokenBudget || 'default';
   if (dom.localToolsCheckbox) dom.localToolsCheckbox.checked = Boolean(store.defaults.localTools);
   dom.storeCheckbox.checked = Boolean(store.defaults.storeResponses);
   dom.instructionsTextarea.value = chat.instructions || '';
@@ -760,7 +793,7 @@ function applyStateToSettingsUI() {
   dom.reasoningEffortSelect.disabled = !reasoning;
   dom.reasoningSummarySelect.disabled = !reasoning;
 
-  const mode = store.defaults.reasoningEffort === 'high' ? 'thinking' : store.defaults.reasoningEffort === 'low' ? 'instant' : 'auto';
+  const mode = modeLabelForEffort(store.defaults.reasoningEffort || 'medium').toLowerCase();
   if (dom.modeAuto && dom.modeInstant && dom.modeThinking) {
     dom.modeAuto.checked = mode === 'auto';
     dom.modeInstant.checked = mode === 'instant';
@@ -944,6 +977,12 @@ function renderModelList() {
       sub.className = 'small text-body-secondary';
       sub.textContent = m.blurb || m.id;
       left.append(name, sub);
+      if (m.deprecated) {
+        const dep = document.createElement('div');
+        dep.className = 'small text-danger-emphasis';
+        dep.textContent = m.deprecated;
+        left.appendChild(dep);
+      }
 
       const right = document.createElement('div');
       right.className = 'text-end small text-body-secondary';
@@ -967,7 +1006,7 @@ function renderModelList() {
     group: g.group,
     models: g.models.filter((m) => {
       if (!q) return true;
-      const hay = `${m.id} ${m.title || ''} ${m.blurb || ''}`.toLowerCase();
+      const hay = `${m.id} ${m.title || ''} ${m.blurb || ''} ${m.deprecated || ''}`.toLowerCase();
       return hay.includes(q);
     }),
   }));
@@ -1100,13 +1139,25 @@ async function generateAssistant() {
       model,
       instructions: chat.instructions || '',
       temperature: store.defaults.temperature,
+      topP: store.defaults.topP,
       maxOutputTokens: store.defaults.maxOutputTokens,
       reasoningEffort: store.defaults.reasoningEffort,
       reasoningSummary: store.defaults.reasoningSummary,
+      textVerbosity: store.defaults.textVerbosity,
+      truncation: store.defaults.truncation,
+      promptCacheKey: store.defaults.promptCacheKey,
+      promptCacheRetention: store.defaults.promptCacheRetention,
+      safetyIdentifier: store.defaults.safetyIdentifier,
+      maxToolCalls: store.defaults.maxToolCalls,
       webSearch: store.defaults.webSearch,
       webSearchAllowedDomains: store.defaults.webSearchAllowedDomains,
+      webSearchBlockedDomains: store.defaults.webSearchBlockedDomains,
+      webSearchContextSize: store.defaults.webSearchContextSize,
+      webSearchExternalAccess: store.defaults.webSearchExternalAccess,
+      webSearchReturnTokenBudget: store.defaults.webSearchReturnTokenBudget,
       extraTools,
       store: store.defaults.storeResponses,
+      includeEncryptedReasoning: isReasoningModel(model) && !store.defaults.storeResponses,
     };
 
     const lastUser = [...chat.messages].reverse().find((m) => m.role === 'user');
@@ -1128,6 +1179,7 @@ async function generateAssistant() {
 
     const runSingleResponse = async (body) => {
       const toolCalls = [];
+      let outputItems = [];
 
       await streamResponses({
         apiKey,
@@ -1193,6 +1245,7 @@ async function generateAssistant() {
           if (evt?.type === 'response.completed') {
             if (evt?.response?.usage) usage = evt.response.usage;
             const out = Array.isArray(evt?.response?.output) ? evt.response.output : [];
+            outputItems = out;
             for (const item of out) {
               if (!item || typeof item !== 'object' || item.type !== 'function_call') continue;
               if (typeof item.call_id !== 'string' || typeof item.name !== 'string') continue;
@@ -1211,7 +1264,7 @@ async function generateAssistant() {
         },
       });
 
-      return toolCalls;
+      return { toolCalls, outputItems };
     };
 
     const runWithLocalTools = async (firstBody) => {
@@ -1219,9 +1272,10 @@ async function generateAssistant() {
       const maxRounds = 4;
 
       for (let round = 0; round <= maxRounds; round += 1) {
-        const calls = await runSingleResponse(current);
+        const result = await runSingleResponse(current);
+        const calls = result.toolCalls || [];
         if (!store.defaults.localTools || !calls.length) return;
-        if (!responseId) throw new Error('Missing response id for tool calls.');
+        if (store.defaults.storeResponses && !responseId) throw new Error('Missing response id for tool calls.');
 
         if (metaEl) {
           metaEl.hidden = false;
@@ -1238,10 +1292,14 @@ async function generateAssistant() {
           }
         }
 
+        const inputItems = store.defaults.storeResponses
+          ? outputs
+          : [...(result.outputItems || []), ...outputs];
+
         current = buildResponsesBody({
           ...requestDefaults,
-          inputItems: outputs,
-          previousResponseId: responseId,
+          inputItems,
+          previousResponseId: store.defaults.storeResponses ? responseId : null,
         });
       }
 
@@ -1397,11 +1455,22 @@ function bindUI() {
     patchDefaults({
       apiBaseUrl: String(dom.apiBaseUrlInput?.value || '').trim() || store.defaults.apiBaseUrl,
       temperature: Number(dom.temperatureInput?.value),
+      topP: Number(dom.topPInput?.value),
       maxOutputTokens: Math.max(0, parseInt(dom.maxOutputTokensInput?.value || '0', 10) || 0),
       reasoningEffort: dom.reasoningEffortSelect?.value || store.defaults.reasoningEffort,
       reasoningSummary: dom.reasoningSummarySelect?.value || store.defaults.reasoningSummary,
+      textVerbosity: dom.textVerbositySelect?.value || store.defaults.textVerbosity,
+      truncation: dom.truncationSelect?.value || store.defaults.truncation,
+      maxToolCalls: Math.max(0, parseInt(dom.maxToolCallsInput?.value || '0', 10) || 0),
+      promptCacheKey: String(dom.promptCacheKeyInput?.value || '').trim(),
+      promptCacheRetention: dom.promptCacheRetentionSelect?.value || '',
+      safetyIdentifier: String(dom.safetyIdentifierInput?.value || '').trim(),
       webSearch: Boolean(dom.webSearchCheckbox?.checked),
       webSearchAllowedDomains: String(dom.webSearchDomainsInput?.value || '').trim(),
+      webSearchBlockedDomains: String(dom.webSearchBlockedDomainsInput?.value || '').trim(),
+      webSearchContextSize: dom.webSearchContextSizeSelect?.value || store.defaults.webSearchContextSize,
+      webSearchExternalAccess: Boolean(dom.webSearchExternalAccessCheckbox?.checked),
+      webSearchReturnTokenBudget: dom.webSearchReturnTokenBudgetSelect?.value || store.defaults.webSearchReturnTokenBudget,
       localTools: Boolean(dom.localToolsCheckbox?.checked),
       storeResponses: Boolean(dom.storeCheckbox?.checked),
     });
@@ -1449,8 +1518,7 @@ function bindUI() {
   });
 
   const applyMode = (mode) => {
-    const effort = mode === 'thinking' ? 'high' : mode === 'instant' ? 'low' : 'medium';
-    patchDefaults({ reasoningEffort: effort });
+    patchDefaults({ reasoningEffort: effortForMode(mode) });
     applyStateToSettingsUI();
   };
 

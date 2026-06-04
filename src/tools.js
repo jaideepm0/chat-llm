@@ -37,7 +37,8 @@ function calcTool(args) {
 }
 
 function timeTool(args) {
-  const timeZone = typeof args?.time_zone === 'string' ? args.time_zone.trim() : '';
+  const rawTimeZone = args?.time_zone;
+  const timeZone = typeof rawTimeZone === 'string' ? rawTimeZone.trim() : '';
   const now = new Date();
   const iso = now.toISOString();
 
@@ -85,9 +86,9 @@ const LOCAL_TOOLS = [
         type: 'object',
         additionalProperties: false,
         properties: {
-          time_zone: { type: 'string', description: 'IANA time zone name.' },
+          time_zone: { type: ['string', 'null'], description: 'IANA time zone name, or null for the local ISO timestamp.' },
         },
-        required: [],
+        required: ['time_zone'],
       },
     },
     run: timeTool,
@@ -112,4 +113,3 @@ export async function runLocalToolCall({ name, argumentsJson }) {
   const out = await tool.run(args);
   return toCompactString(out);
 }
-

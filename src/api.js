@@ -72,10 +72,22 @@ export function buildResponsesBody({
   maxOutputTokens,
   reasoningEffort,
   reasoningSummary,
+  textVerbosity,
   webSearch,
   webSearchAllowedDomains,
+  webSearchBlockedDomains,
+  webSearchContextSize,
+  webSearchExternalAccess,
+  webSearchReturnTokenBudget,
   extraTools,
   store,
+  includeEncryptedReasoning,
+  promptCacheKey,
+  promptCacheRetention,
+  truncation,
+  safetyIdentifier,
+  maxToolCalls,
+  topP,
 }) {
   const body = {
     model,
@@ -99,21 +111,52 @@ export function buildResponsesBody({
 
   if (Number(maxOutputTokens) > 0) body.max_output_tokens = Number(maxOutputTokens);
 
-  body.temperature = Number(temperature);
+  const temp = Number(temperature);
+  if (Number.isFinite(temp) && temp >= 0 && temp <= 2) body.temperature = temp;
+
+  const topPValue = Number(topP);
+  if (Number.isFinite(topPValue) && topPValue > 0 && topPValue <= 1) body.top_p = topPValue;
+
+  if (['low', 'medium', 'high'].includes(textVerbosity)) {
+    body.text = { ...(body.text || {}), verbosity: textVerbosity };
+  }
+
+  const cacheKey = String(promptCacheKey || '').trim();
+  if (cacheKey) body.prompt_cache_key = cacheKey.slice(0, 64);
+
+  if (['in_memory', '24h'].includes(promptCacheRetention)) body.prompt_cache_retention = promptCacheRetention;
+  if (['auto', 'disabled'].includes(truncation)) body.truncation = truncation;
+
+  const safety = String(safetyIdentifier || '').trim();
+  if (safety) body.safety_identifier = safety.slice(0, 64);
+
+  const maxTools = Number(maxToolCalls);
+  if (Number.isInteger(maxTools) && maxTools > 0) body.max_tool_calls = maxTools;
 
   const toolDefs = [];
+  const include = [];
   if (webSearch) {
     const tool = { type: 'web_search' };
     const allowed = parseAllowedDomains(webSearchAllowedDomains);
-    if (allowed.length) tool.filters = { allowed_domains: allowed };
+    const blocked = parseAllowedDomains(webSearchBlockedDomains);
+    if (allowed.length || blocked.length) {
+      tool.filters = {};
+      if (allowed.length) tool.filters.allowed_domains = allowed;
+      if (blocked.length) tool.filters.blocked_domains = blocked;
+    }
+    if (['low', 'medium', 'high'].includes(webSearchContextSize)) tool.search_context_size = webSearchContextSize;
+    if (typeof webSearchExternalAccess === 'boolean') tool.external_web_access = webSearchExternalAccess;
+    if (['default', 'unlimited'].includes(webSearchReturnTokenBudget)) tool.return_token_budget = webSearchReturnTokenBudget;
     toolDefs.push(tool);
-    body.include = ['web_search_call.action.sources'];
+    include.push('web_search_call.action.sources');
   }
   if (Array.isArray(extraTools) && extraTools.length) toolDefs.push(...extraTools);
   if (toolDefs.length) {
     body.tools = toolDefs;
     body.tool_choice = 'auto';
   }
+  if (includeEncryptedReasoning) include.push('reasoning.encrypted_content');
+  if (include.length) body.include = [...new Set(include)];
 
   if (isReasoningModel(model)) {
     body.reasoning = { effort: reasoningEffort || 'medium' };

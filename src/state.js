@@ -7,16 +7,34 @@ const LEGACY_KEY = 'chat_llm_state_v3';
 
 const MAX_MESSAGES_PER_CHAT = 400;
 const MAX_PINNED = 3;
+const REASONING_EFFORTS = new Set(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']);
+const REASONING_SUMMARIES = new Set(['none', 'auto', 'concise', 'detailed']);
+const TEXT_VERBOSITIES = new Set(['low', 'medium', 'high']);
+const TRUNCATION_MODES = new Set(['disabled', 'auto']);
+const CACHE_RETENTIONS = new Set(['', 'in_memory', '24h']);
+const SEARCH_CONTEXT_SIZES = new Set(['low', 'medium', 'high']);
+const SEARCH_TOKEN_BUDGETS = new Set(['default', 'unlimited']);
 
 function blankDefaults() {
   return {
     model: DEFAULT_MODEL,
     temperature: 1.0,
+    topP: 0,
     maxOutputTokens: 0,
     reasoningEffort: 'medium',
     reasoningSummary: 'auto',
+    textVerbosity: 'medium',
+    truncation: 'disabled',
+    promptCacheKey: '',
+    promptCacheRetention: '',
+    safetyIdentifier: '',
+    maxToolCalls: 0,
     webSearch: false,
     webSearchAllowedDomains: '',
+    webSearchBlockedDomains: '',
+    webSearchContextSize: 'medium',
+    webSearchExternalAccess: true,
+    webSearchReturnTokenBudget: 'default',
     localTools: false,
     storeResponses: false,
     apiBaseUrl: 'https://api.openai.com',
@@ -43,6 +61,11 @@ function sanitizeBool(v, fallback = false) {
   return typeof v === 'boolean' ? v : fallback;
 }
 
+function sanitizeChoice(v, fallback, allowed) {
+  const next = sanitizeString(v, fallback).trim();
+  return allowed.has(next) ? next : fallback;
+}
+
 function sanitizeNumber(v, fallback = 0) {
   return typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 }
@@ -52,12 +75,23 @@ function sanitizeDefaults(d) {
   if (!d || typeof d !== 'object') return out;
 
   out.model = sanitizeString(d.model, out.model) || out.model;
-  out.temperature = sanitizeNumber(d.temperature, out.temperature);
+  out.temperature = Math.min(2, Math.max(0, sanitizeNumber(d.temperature, out.temperature)));
+  out.topP = Math.min(1, Math.max(0, sanitizeNumber(d.topP, out.topP)));
   out.maxOutputTokens = Math.max(0, sanitizeNumber(d.maxOutputTokens, out.maxOutputTokens));
-  out.reasoningEffort = sanitizeString(d.reasoningEffort, out.reasoningEffort) || out.reasoningEffort;
-  out.reasoningSummary = sanitizeString(d.reasoningSummary, out.reasoningSummary) || out.reasoningSummary;
+  out.reasoningEffort = sanitizeChoice(d.reasoningEffort, out.reasoningEffort, REASONING_EFFORTS);
+  out.reasoningSummary = sanitizeChoice(d.reasoningSummary, out.reasoningSummary, REASONING_SUMMARIES);
+  out.textVerbosity = sanitizeChoice(d.textVerbosity, out.textVerbosity, TEXT_VERBOSITIES);
+  out.truncation = sanitizeChoice(d.truncation, out.truncation, TRUNCATION_MODES);
+  out.promptCacheKey = sanitizeString(d.promptCacheKey, out.promptCacheKey).trim().slice(0, 64);
+  out.promptCacheRetention = sanitizeChoice(d.promptCacheRetention, out.promptCacheRetention, CACHE_RETENTIONS);
+  out.safetyIdentifier = sanitizeString(d.safetyIdentifier, out.safetyIdentifier).trim().slice(0, 64);
+  out.maxToolCalls = Math.max(0, Math.floor(sanitizeNumber(d.maxToolCalls, out.maxToolCalls)));
   out.webSearch = sanitizeBool(d.webSearch, out.webSearch);
   out.webSearchAllowedDomains = sanitizeString(d.webSearchAllowedDomains, out.webSearchAllowedDomains);
+  out.webSearchBlockedDomains = sanitizeString(d.webSearchBlockedDomains, out.webSearchBlockedDomains);
+  out.webSearchContextSize = sanitizeChoice(d.webSearchContextSize, out.webSearchContextSize, SEARCH_CONTEXT_SIZES);
+  out.webSearchExternalAccess = sanitizeBool(d.webSearchExternalAccess, out.webSearchExternalAccess);
+  out.webSearchReturnTokenBudget = sanitizeChoice(d.webSearchReturnTokenBudget, out.webSearchReturnTokenBudget, SEARCH_TOKEN_BUDGETS);
   out.localTools = sanitizeBool(d.localTools, out.localTools);
   out.storeResponses = sanitizeBool(d.storeResponses, out.storeResponses);
   out.apiBaseUrl = sanitizeString(d.apiBaseUrl, out.apiBaseUrl) || out.apiBaseUrl;

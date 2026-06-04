@@ -1,0 +1,11 @@
+{
+  "name": "chat-llm",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check src/*.js && node --check tests/*.test.js",
+    "test": "node --test tests/*.test.js",
+    "verify": "npm run check && npm test"
+  }
+}

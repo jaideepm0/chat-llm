@@ -23,7 +23,7 @@ Example curl:
 curl https://api.openai.com/v1/responses \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"model":"gpt-5.2","input":"Say hello","stream":false}'
+  -d '{"model":"gpt-5.4-mini","input":"Say hello","stream":false}'
 ```
 
 Use the right rail for quick browser tools, prompt inserts, and reusable workspace modes.
