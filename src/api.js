@@ -4,14 +4,79 @@ import { getModelInfo, isReasoningModel } from './models.js';
 
 const API_KEY_SS = 'chat_llm_api_key_v1';
 const DEFAULT_BASE_URL = 'https://api.openai.com';
+const KEY_PERSISTENCE_MODES = new Set(['memory', 'session']);
 
-export function getApiKey() {
-  return (session?.getItem(API_KEY_SS) || '').trim();
+let memoryApiKey = '';
+let apiKeyPersistence = 'memory';
+
+function dispatchStorageWarning() {
+  try {
+    globalThis.window?.dispatchEvent(new CustomEvent('chat-llm-storage-error', {
+      detail: { key: API_KEY_SS, message: 'Browser storage is full or unavailable.' },
+    }));
+  } catch {
+    // ignore
+  }
 }
 
-export function setApiKey(key) {
+function writeSessionApiKey(value) {
+  try {
+    session?.setItem(API_KEY_SS, value);
+    return true;
+  } catch {
+    try {
+      session?.removeItem(API_KEY_SS);
+    } catch {
+      // ignore
+    }
+    dispatchStorageWarning();
+    return false;
+  }
+}
+
+export function getApiKey() {
+  if (apiKeyPersistence === 'session') return (session?.getItem(API_KEY_SS) || memoryApiKey || '').trim();
+  return memoryApiKey.trim();
+}
+
+export function getApiKeyPersistence() {
+  return apiKeyPersistence;
+}
+
+export function setApiKeyPersistence(mode) {
+  apiKeyPersistence = KEY_PERSISTENCE_MODES.has(mode) ? mode : 'memory';
+  if (apiKeyPersistence === 'memory') {
+    try {
+      session?.removeItem(API_KEY_SS);
+    } catch {
+      // ignore
+    }
+  } else if (memoryApiKey) {
+    writeSessionApiKey(memoryApiKey);
+  }
+}
+
+export function setApiKey(key, { persistence } = {}) {
   const v = String(key || '').trim();
-  session?.setItem(API_KEY_SS, v);
+  if (persistence) setApiKeyPersistence(persistence);
+  memoryApiKey = v;
+  if (apiKeyPersistence === 'session') writeSessionApiKey(v);
+  else {
+    try {
+      session?.removeItem(API_KEY_SS);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function clearApiKey() {
+  memoryApiKey = '';
+  try {
+    session?.removeItem(API_KEY_SS);
+  } catch {
+    // ignore
+  }
 }
 
 function normalizeBaseUrl(baseUrl) {
@@ -36,6 +101,75 @@ function parseAllowedDomains(input) {
     .map((x) => x.replace(/\/$/, ''))
     .map((x) => x.toLowerCase())
     .filter(Boolean);
+}
+
+function parseStringList(input) {
+  if (!input) return [];
+  const raw = Array.isArray(input) ? input.join(',') : String(input);
+  return raw
+    .split(/[,\n]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function sanitizeInputAttachments(inputAttachments) {
+  if (!Array.isArray(inputAttachments)) return [];
+
+  const out = [];
+  for (const item of inputAttachments) {
+    if (!item || typeof item !== 'object') continue;
+    const type = String(item.type || '').trim();
+
+    if (type === 'input_image' || type === 'image') {
+      const imageUrl = String(item.image_url || item.imageUrl || item.url || '').trim();
+      if (!imageUrl) continue;
+      const next = { type: 'input_image', image_url: imageUrl };
+      if (['low', 'high', 'original', 'auto'].includes(item.detail)) next.detail = item.detail;
+      out.push(next);
+      continue;
+    }
+
+    if (type === 'input_file' || type === 'file') {
+      const fileUrl = String(item.file_url || item.fileUrl || item.url || '').trim();
+      const fileId = String(item.file_id || item.fileId || '').trim();
+      if (!fileUrl && !fileId) continue;
+      const next = { type: 'input_file' };
+      if (fileUrl) next.file_url = fileUrl;
+      if (fileId) next.file_id = fileId;
+      const filename = String(item.filename || '').trim();
+      if (filename) next.filename = filename.slice(0, 128);
+      out.push(next);
+    }
+  }
+
+  return out.slice(0, 20);
+}
+
+function buildMessageInput(messages, inputAttachments = []) {
+  const attachments = sanitizeInputAttachments(inputAttachments);
+  const items = (messages || []).map((m) => ({
+    role: m.role,
+    content: [{ type: 'input_text', text: String(m.content || '') }],
+  }));
+
+  if (attachments.length) {
+    const lastUser = [...items].reverse().find((m) => m.role === 'user');
+    if (lastUser) lastUser.content.push(...attachments);
+  }
+
+  return items;
+}
+
+function buildSingleInput(input, inputAttachments = []) {
+  const attachments = sanitizeInputAttachments(inputAttachments);
+  if (!attachments.length) return input;
+  return [{
+    role: 'user',
+    content: [
+      { type: 'input_text', text: String(input || '') },
+      ...attachments,
+    ],
+  }];
 }
 
 export async function refreshAccountModels({ apiKey, baseUrl } = {}) {
@@ -66,6 +200,7 @@ export function buildResponsesBody({
   messages,
   input,
   inputItems,
+  inputAttachments,
   previousResponseId,
   instructions,
   temperature,
@@ -79,6 +214,15 @@ export function buildResponsesBody({
   webSearchContextSize,
   webSearchExternalAccess,
   webSearchReturnTokenBudget,
+  fileSearch,
+  fileSearchVectorStoreIds,
+  fileSearchMaxResults,
+  includeFileSearchResults,
+  imageGeneration,
+  imageGenerationAction,
+  imageGenerationSize,
+  imageGenerationQuality,
+  imageGenerationPartialImages,
   extraTools,
   store,
   includeEncryptedReasoning,
@@ -88,17 +232,18 @@ export function buildResponsesBody({
   safetyIdentifier,
   maxToolCalls,
   topP,
+  toolChoice,
+  parallelToolCalls,
+  background,
+  serviceTier,
 }) {
   const body = {
     model,
     input: typeof inputItems !== 'undefined'
       ? inputItems
       : typeof input !== 'undefined'
-        ? input
-        : (messages || []).map((m) => ({
-          role: m.role,
-          content: [{ type: 'input_text', text: String(m.content || '') }],
-        })),
+        ? buildSingleInput(input, inputAttachments)
+        : buildMessageInput(messages || [], inputAttachments),
     stream: true,
     store: Boolean(store),
   };
@@ -133,6 +278,10 @@ export function buildResponsesBody({
   const maxTools = Number(maxToolCalls);
   if (Number.isInteger(maxTools) && maxTools > 0) body.max_tool_calls = maxTools;
 
+  if (typeof parallelToolCalls === 'boolean') body.parallel_tool_calls = parallelToolCalls;
+  if (typeof background === 'boolean') body.background = background;
+  if (['auto', 'default', 'flex', 'priority'].includes(serviceTier)) body.service_tier = serviceTier;
+
   const toolDefs = [];
   const include = [];
   if (webSearch) {
@@ -150,10 +299,30 @@ export function buildResponsesBody({
     toolDefs.push(tool);
     include.push('web_search_call.action.sources');
   }
+  if (fileSearch) {
+    const vectorStoreIds = parseStringList(fileSearchVectorStoreIds);
+    const tool = { type: 'file_search' };
+    if (vectorStoreIds.length) tool.vector_store_ids = vectorStoreIds;
+    const maxResults = Number(fileSearchMaxResults);
+    if (Number.isInteger(maxResults) && maxResults > 0) tool.max_num_results = Math.min(50, maxResults);
+    toolDefs.push(tool);
+    if (includeFileSearchResults) include.push('file_search_call.results');
+  }
+  if (imageGeneration) {
+    const tool = { type: 'image_generation' };
+    if (['auto', 'generate', 'edit'].includes(imageGenerationAction)) tool.action = imageGenerationAction;
+    if (['1024x1024', '1024x1536', '1536x1024', 'auto'].includes(imageGenerationSize)) tool.size = imageGenerationSize;
+    if (['low', 'medium', 'high', 'auto'].includes(imageGenerationQuality)) tool.quality = imageGenerationQuality;
+    const partialImages = Number(imageGenerationPartialImages);
+    if (Number.isInteger(partialImages) && partialImages > 0) tool.partial_images = Math.min(3, partialImages);
+    toolDefs.push(tool);
+  }
   if (Array.isArray(extraTools) && extraTools.length) toolDefs.push(...extraTools);
   if (toolDefs.length) {
     body.tools = toolDefs;
-    body.tool_choice = 'auto';
+    body.tool_choice = ['auto', 'required', 'none'].includes(toolChoice) ? toolChoice : 'auto';
+  } else if (['none'].includes(toolChoice)) {
+    body.tool_choice = toolChoice;
   }
   if (includeEncryptedReasoning) include.push('reasoning.encrypted_content');
   if (include.length) body.include = [...new Set(include)];
@@ -217,8 +386,18 @@ export function extractTextAndAnnotationsFromResponse(response) {
   let outputText = '';
   let reasoningSummary = '';
   const annotations = [];
+  const artifacts = [];
 
   for (const item of output) {
+    if (item?.type === 'image_generation_call' && typeof item.result === 'string' && item.result) {
+      artifacts.push({
+        type: 'image',
+        mimeType: 'image/png',
+        data: item.result,
+        revisedPrompt: typeof item.revised_prompt === 'string' ? item.revised_prompt : undefined,
+      });
+    }
+
     if (item?.type === 'reasoning' && Array.isArray(item.summary)) {
       for (const part of item.summary) {
         if (part?.type === 'summary_text' && typeof part.text === 'string') reasoningSummary += part.text;
@@ -249,7 +428,7 @@ export function extractTextAndAnnotationsFromResponse(response) {
     }
   }
 
-  return { outputText, reasoningSummary, annotations };
+  return { outputText, reasoningSummary, annotations, artifacts };
 }
 
 export function injectCitationLinks(text, annotations) {

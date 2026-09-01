@@ -1,5 +1,5 @@
 // Prices from https://platform.openai.com/docs/pricing (Standard tier, per 1M tokens).
-export const DEFAULT_MODEL = 'gpt-5.4-mini';
+export const DEFAULT_MODEL = 'gpt-5.5';
 
 export const MODEL_CATALOG = [
   {

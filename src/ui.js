@@ -10,6 +10,7 @@ import {
   patchDefaults,
   persist,
   renameChat,
+  resetStore,
   setActiveChat,
   setChatInstructions,
   setChatModel,
@@ -18,7 +19,7 @@ import {
   togglePinChat,
   truncateAfterMessage,
   updateMessage,
-} from './state.js';
+} from './state.js?v=20260604-state-reset';
 import { DEFAULT_MODEL, MODEL_CATALOG, isReasoningModel, modelPricingLabel } from './models.js';
 import {
   buildResponsesBody,
@@ -26,25 +27,33 @@ import {
   extractResponseId,
   extractTextAndAnnotationsFromResponse,
   fetchResponseById,
+  clearApiKey,
   getApiKey,
   injectCitationLinks,
   refreshAccountModels,
   setApiKey,
+  setApiKeyPersistence,
   streamResponses,
 } from './api.js';
 import { confirmDialog, toast } from './overlays.js';
 import { debounce, escapeHtml, formatAgeShort, nowMs } from './utils.js';
-import { local as localStorageSafe } from './storage.js';
-import { getLocalToolDefinitions, runLocalToolCall } from './tools.js';
+import { local as localStorageSafe, writeText } from './storage.js';
+import { assessRequestPreflight, normalizeBaseUrl } from './security.js';
+import { formatToolError, getLocalToolDefinitions, runLocalToolCall } from './tools.js';
 
 const THEME_KEY = 'chat_theme_preference';
+const SIDEBAR_KEY = 'chat_sidebar_preference';
 const PRISM_LIGHT_ID = 'prism-light';
 const PRISM_DARK_ID = 'prism-dark';
 const COMPOSER_MAX_HEIGHT = 320;
 
 const dom = {
-  sidebar: document.getElementById('sidebar'),
+  appShell: document.querySelector('[data-app-shell]'),
+  sidebar: document.getElementById('conversation-rail'),
   sidebarBackdrop: document.getElementById('sidebar-backdrop'),
+  inspectorBackdrop: document.getElementById('inspector-backdrop'),
+  inspectorToggle: document.getElementById('inspector-toggle'),
+  sidebarToggle: document.getElementById('sidebar-toggle'),
   sidebarOpen: document.getElementById('sidebar-open'),
   sidebarClose: document.getElementById('sidebar-close'),
   chatList: document.getElementById('chat-list'),
@@ -80,8 +89,10 @@ const dom = {
   drawerBackdrop: document.getElementById('drawer-backdrop'),
   settingsForm: document.getElementById('settings-form'),
   apiKeyInput: document.getElementById('api-key'),
+  apiKeySessionCheckbox: document.getElementById('api-key-session'),
   apiBaseUrlInput: document.getElementById('api-base-url'),
   testConnectionBtn: document.getElementById('test-connection'),
+  privacyResetBtn: document.getElementById('privacy-reset'),
   temperatureInput: document.getElementById('temperature'),
   topPInput: document.getElementById('top-p'),
   maxOutputTokensInput: document.getElementById('max-output-tokens'),
@@ -102,9 +113,32 @@ const dom = {
   localToolsCheckbox: document.getElementById('local-tools'),
   storeCheckbox: document.getElementById('store'),
   instructionsTextarea: document.getElementById('instructions'),
+  apiModeSelect: document.getElementById('api-mode'),
+  toolChoiceSelect: document.getElementById('tool-choice'),
+  parallelToolCallsCheckbox: document.getElementById('parallel-tool-calls'),
+  backgroundModeCheckbox: document.getElementById('background-mode'),
+  serviceTierSelect: document.getElementById('service-tier'),
+  attachmentImageUrlInput: document.getElementById('attachment-image-url'),
+  attachmentFileUrlInput: document.getElementById('attachment-file-url'),
+  attachmentChips: document.getElementById('attachment-chips'),
+  fileSearchCheckbox: document.getElementById('file-search'),
+  fileSearchVectorStoresInput: document.getElementById('file-search-vector-stores'),
+  fileSearchMaxResultsInput: document.getElementById('file-search-max-results'),
+  includeFileSearchResultsCheckbox: document.getElementById('include-file-search-results'),
+  imageGenerationCheckbox: document.getElementById('image-generation'),
+  imageGenerationActionSelect: document.getElementById('image-generation-action'),
+  imageGenerationSizeSelect: document.getElementById('image-generation-size'),
+  imageGenerationQualitySelect: document.getElementById('image-generation-quality'),
+  imageGenerationPartialImagesInput: document.getElementById('image-generation-partial-images'),
+  requestPreview: document.getElementById('request-preview'),
+  copyRequestButton: document.getElementById('copy-request'),
+  inspectorTabs: document.querySelectorAll('[data-panel-tab]'),
+  inspectorSections: document.querySelectorAll('[data-panel-section]'),
 
   modelPickerOpen: document.getElementById('model-picker-open'),
   activeModel: document.getElementById('active-model'),
+  connectionStatus: document.getElementById('connection-status'),
+  connectionStatusLabel: document.getElementById('connection-status-label'),
   modelPickerBackdrop: document.getElementById('model-picker-backdrop'),
   modelPicker: document.getElementById('model-picker'),
   modelPickerClose: document.getElementById('model-picker-close'),
@@ -165,6 +199,9 @@ const runtime = {
   emptyStateEl: null,
   selectedCommandIndex: 0,
   editingMessageId: null,
+  hydratingControls: true,
+  inspectorInteractionStarted: false,
+  controlSyncTimer: null,
 };
 
 const WORKSPACE_PRESETS = {
@@ -185,21 +222,30 @@ const WORKSPACE_PRESETS = {
   },
 };
 
+const EMPTY_PROMPTS = [
+  {
+    label: 'Explain code',
+    prompt: 'Explain this code clearly and point out any edge cases.',
+  },
+  {
+    label: 'Debug an error',
+    prompt: 'Help me debug this error. Ask for missing context if needed.',
+  },
+  {
+    label: 'Summarize text',
+    prompt: 'Summarize this into the key points and next actions.',
+  },
+  {
+    label: 'Compare options',
+    prompt: 'Compare the best options in a concise table with a recommendation.',
+  },
+];
+
 const defaultCopy = {
   brand: `**Chat LLM**`,
-  helper: `_API key stays in this tab session. For production, use a backend proxy._`,
-  composer: `_Enter to send • Shift+Enter for a new line • Use quick toggles for tools and mode_`,
-  empty: `# Chat with OpenAI via the Responses API
-
-- Start a **New chat**
-- Choose a model (top right)
-- Add your API key in **Settings**
-- Apply a **workspace preset** for writing, coding, or research
-
-Tips:
-- Press **Ctrl+K** to search chats
-- Turn on **Web search** for citations
-- Use the right-side **Browser tools** to calculate, format JSON, and inspect text`,
+  helper: ``,
+  composer: ``,
+  empty: `Start a new conversation`,
 };
 
 let copyContent = { ...defaultCopy };
@@ -234,7 +280,7 @@ function applyCopy() {
 function applyTheme(theme) {
   const normalized = theme === 'dark' ? 'dark' : 'light';
   document.documentElement.setAttribute('data-bs-theme', normalized);
-  localStorageSafe?.setItem(THEME_KEY, normalized);
+  writeText(localStorageSafe, THEME_KEY, normalized);
 
   const light = document.getElementById(PRISM_LIGHT_ID);
   const dark = document.getElementById(PRISM_DARK_ID);
@@ -254,9 +300,53 @@ function loadThemePreference() {
   if (stored === 'dark' || stored === 'light') applyTheme(stored);
 }
 
+function isDesktopSidebarLayout() {
+  return window.matchMedia('(min-width: 992px)').matches;
+}
+
+function setSidebarCollapsed(collapsed, { persistPreference = true } = {}) {
+  const desktop = isDesktopSidebarLayout();
+  const shouldCollapse = Boolean(collapsed && desktop);
+
+  dom.appShell?.classList.toggle('sidebar-collapsed', shouldCollapse);
+
+  if (persistPreference) {
+    writeText(localStorageSafe, SIDEBAR_KEY, collapsed ? 'collapsed' : 'expanded');
+  }
+
+  if (dom.sidebarToggle) {
+    dom.sidebarToggle.setAttribute('aria-pressed', shouldCollapse ? 'true' : 'false');
+    dom.sidebarToggle.setAttribute('aria-label', shouldCollapse ? 'Expand sidebar' : 'Collapse sidebar');
+  }
+
+  if (dom.sidebar) {
+    const hidden = shouldCollapse || (!desktop && !dom.sidebar.classList.contains('open'));
+    dom.sidebar.setAttribute('aria-hidden', hidden ? 'true' : 'false');
+  }
+}
+
+function syncSidebarPreference() {
+  const pref = localStorageSafe?.getItem(SIDEBAR_KEY);
+  setSidebarCollapsed(pref === 'collapsed', { persistPreference: false });
+}
+
+function toggleSidebarRail() {
+  if (!isDesktopSidebarLayout()) {
+    openSidebar();
+    return;
+  }
+  setSidebarCollapsed(!dom.appShell?.classList.contains('sidebar-collapsed'));
+}
+
+function syncResponsiveChrome() {
+  syncInspectorBackdrop();
+  syncSidebarPreference();
+}
+
 function updateOverlayLock() {
   const locked = Boolean(
     dom.sidebarBackdrop?.classList.contains('open')
+    || dom.inspectorBackdrop?.classList.contains('open')
     || dom.drawerBackdrop?.classList.contains('open')
     || dom.modelPickerBackdrop?.classList.contains('open')
     || dom.commandBackdrop?.classList.contains('open'),
@@ -265,6 +355,10 @@ function updateOverlayLock() {
 }
 
 function openSidebar() {
+  if (isDesktopSidebarLayout()) {
+    setSidebarCollapsed(false);
+    return;
+  }
   dom.sidebar?.classList.add('open');
   dom.sidebarBackdrop?.classList.add('open');
   if (dom.sidebarBackdrop) dom.sidebarBackdrop.hidden = false;
@@ -276,11 +370,47 @@ function closeSidebar() {
   dom.sidebar?.classList.remove('open');
   dom.sidebarBackdrop?.classList.remove('open');
   if (dom.sidebarBackdrop) dom.sidebarBackdrop.hidden = true;
-  dom.sidebar?.setAttribute('aria-hidden', 'true');
+  const hidden = !isDesktopSidebarLayout() || dom.appShell?.classList.contains('sidebar-collapsed');
+  dom.sidebar?.setAttribute('aria-hidden', hidden ? 'true' : 'false');
   updateOverlayLock();
 }
 
+function shouldOverlayInspector() {
+  return window.matchMedia('(max-width: 1320px)').matches;
+}
+
+function syncInspectorBackdrop() {
+  const isOpen = dom.appShell?.classList.contains('inspector-open');
+  const overlay = Boolean(isOpen && shouldOverlayInspector());
+  dom.inspectorBackdrop?.classList.toggle('open', overlay);
+  if (dom.inspectorBackdrop) dom.inspectorBackdrop.hidden = !overlay;
+  updateOverlayLock();
+}
+
+function openInspector() {
+  closeSidebar();
+  dom.appShell?.classList.add('inspector-open');
+  dom.inspectorToggle?.setAttribute('aria-expanded', 'true');
+  document.getElementById('run-inspector')?.setAttribute('aria-hidden', 'false');
+  syncInspectorBackdrop();
+}
+
+function closeInspector() {
+  dom.appShell?.classList.remove('inspector-open');
+  dom.inspectorToggle?.setAttribute('aria-expanded', 'false');
+  document.getElementById('run-inspector')?.setAttribute('aria-hidden', 'true');
+  dom.inspectorBackdrop?.classList.remove('open');
+  if (dom.inspectorBackdrop) dom.inspectorBackdrop.hidden = true;
+  updateOverlayLock();
+}
+
+function toggleInspector() {
+  if (dom.appShell?.classList.contains('inspector-open')) closeInspector();
+  else openInspector();
+}
+
 function openSettingsDrawer() {
+  closeInspector();
   dom.settingsDrawer?.classList.add('open');
   dom.drawerBackdrop?.classList.add('open');
   if (dom.drawerBackdrop) dom.drawerBackdrop.hidden = false;
@@ -369,7 +499,9 @@ function updateComposerState() {
 function autoResizeTextarea(textarea, maxHeight) {
   if (!textarea) return;
   textarea.style.height = 'auto';
-  textarea.style.height = `${Math.min(textarea.scrollHeight, maxHeight)}px`;
+  const nextHeight = Math.min(textarea.scrollHeight, maxHeight);
+  textarea.style.height = `${nextHeight}px`;
+  textarea.style.overflowY = textarea.scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 function updateHeader() {
@@ -386,6 +518,15 @@ function updateHeader() {
   }
 
   renderWorkspaceSummary();
+}
+
+function updateConnectionStatus() {
+  const ready = Boolean(getApiKey());
+  dom.connectionStatus?.classList.toggle('ready', ready);
+  if (dom.connectionStatusLabel) dom.connectionStatusLabel.textContent = ready ? 'Ready' : 'No key';
+  if (dom.connectionStatus) {
+    dom.connectionStatus.title = ready ? 'API key is set for this tab.' : 'Add an API key to send messages.';
+  }
 }
 
 function modeLabelForEffort(effort) {
@@ -419,9 +560,14 @@ function renderWorkspaceSummary() {
   const toolFlags = [];
   if (store.defaults.localTools) toolFlags.push('Local');
   if (store.defaults.webSearch) toolFlags.push('Web');
+  if (store.defaults.fileSearch) toolFlags.push('Files');
+  if (store.defaults.imageGeneration) toolFlags.push('Images');
   if (dom.workspaceTools) dom.workspaceTools.textContent = toolFlags.length ? toolFlags.join(' + ') : 'Off';
   dom.composerWebToggle?.classList.toggle('active', Boolean(store.defaults.webSearch));
   dom.composerToolsToggle?.classList.toggle('active', Boolean(store.defaults.localTools));
+  renderAttachmentChips();
+  renderRequestPreview();
+  updateConnectionStatus();
 }
 
 function applyWorkspacePreset(name) {
@@ -526,6 +672,179 @@ function insertPromptTemplate(text) {
   autoResizeTextarea(dom.userInput, COMPOSER_MAX_HEIGHT);
   updateComposerState();
   dom.userInput.focus();
+}
+
+function parseUrlLines(value) {
+  return String(value || '')
+    .split(/[\n,]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function getInputAttachments() {
+  const images = parseUrlLines(store.defaults.inputImageUrls).map((url) => ({
+    type: 'input_image',
+    image_url: url,
+    detail: 'auto',
+  }));
+  const files = parseUrlLines(store.defaults.inputFileUrls).map((url) => ({
+    type: 'input_file',
+    file_url: url,
+  }));
+  return [...images, ...files];
+}
+
+function renderAttachmentChips() {
+  if (!dom.attachmentChips) return;
+  const attachments = getInputAttachments();
+  dom.attachmentChips.replaceChildren();
+  if (!attachments.length) {
+    const empty = document.createElement('span');
+    empty.className = 'attachment-empty';
+    empty.textContent = 'No turn attachments.';
+    dom.attachmentChips.appendChild(empty);
+    return;
+  }
+
+  attachments.forEach((item, index) => {
+    const chip = document.createElement('span');
+    chip.className = 'attachment-chip';
+    chip.textContent = `${item.type === 'input_image' ? 'Image' : 'File'} ${index + 1}`;
+    chip.title = item.image_url || item.file_url || '';
+    dom.attachmentChips.appendChild(chip);
+  });
+}
+
+function buildPreviewBody() {
+  const chat = getActiveChat();
+  const model = chat?.model || store.defaults.model || DEFAULT_MODEL;
+  const sampleInput = chat?.messages?.length
+    ? chat.messages.filter((m) => m.role === 'user' || m.role === 'assistant').slice(-4)
+    : [{ role: 'user', content: 'Your next message will appear here.' }];
+
+  return buildResponsesBody({
+    model,
+    messages: sampleInput,
+    instructions: chat?.instructions || '',
+    temperature: store.defaults.temperature,
+    topP: store.defaults.topP,
+    maxOutputTokens: store.defaults.maxOutputTokens,
+    reasoningEffort: store.defaults.reasoningEffort,
+    reasoningSummary: store.defaults.reasoningSummary,
+    textVerbosity: store.defaults.textVerbosity,
+    truncation: store.defaults.truncation,
+    promptCacheKey: store.defaults.promptCacheKey,
+    promptCacheRetention: store.defaults.promptCacheRetention,
+    safetyIdentifier: store.defaults.safetyIdentifier,
+    maxToolCalls: store.defaults.maxToolCalls,
+    webSearch: store.defaults.webSearch,
+    webSearchAllowedDomains: store.defaults.webSearchAllowedDomains,
+    webSearchBlockedDomains: store.defaults.webSearchBlockedDomains,
+    webSearchContextSize: store.defaults.webSearchContextSize,
+    webSearchExternalAccess: store.defaults.webSearchExternalAccess,
+    webSearchReturnTokenBudget: store.defaults.webSearchReturnTokenBudget,
+    fileSearch: store.defaults.fileSearch,
+    fileSearchVectorStoreIds: store.defaults.fileSearchVectorStoreIds,
+    fileSearchMaxResults: store.defaults.fileSearchMaxResults,
+    includeFileSearchResults: store.defaults.includeFileSearchResults,
+    imageGeneration: store.defaults.imageGeneration,
+    imageGenerationAction: store.defaults.imageGenerationAction,
+    imageGenerationSize: store.defaults.imageGenerationSize,
+    imageGenerationQuality: store.defaults.imageGenerationQuality,
+    imageGenerationPartialImages: store.defaults.imageGenerationPartialImages,
+    inputAttachments: getInputAttachments(),
+    extraTools: store.defaults.localTools ? getLocalToolDefinitions() : [],
+    store: store.defaults.storeResponses,
+    includeEncryptedReasoning: isReasoningModel(model) && !store.defaults.storeResponses,
+    toolChoice: store.defaults.toolChoice,
+    parallelToolCalls: store.defaults.parallelToolCalls,
+    background: store.defaults.backgroundMode,
+    serviceTier: store.defaults.serviceTier,
+  });
+}
+
+function renderRequestPreview() {
+  if (!dom.requestPreview) return;
+  try {
+    dom.requestPreview.textContent = JSON.stringify(buildPreviewBody(), null, 2);
+  } catch (error) {
+    dom.requestPreview.textContent = JSON.stringify({ error: error?.message || String(error) }, null, 2);
+  }
+}
+
+async function copyRequestPreview() {
+  const text = dom.requestPreview?.textContent || JSON.stringify(buildPreviewBody(), null, 2);
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('API request copied.', { variant: 'success', timeoutMs: 1200 });
+  } catch {
+    toast('Copy failed.', { variant: 'warning', timeoutMs: 1800 });
+  }
+}
+
+function exportCurrentChat() {
+  const chat = getActiveChat();
+  if (!chat) return;
+  const now = new Date().toISOString().replace(/[:.]/g, '-');
+  const blob = new Blob([JSON.stringify({ chat, defaults: store.defaults }, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `chat-llm-${now}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function markInspectorInteraction() {
+  runtime.inspectorInteractionStarted = true;
+  runtime.hydratingControls = false;
+  if (runtime.controlSyncTimer) {
+    window.clearInterval(runtime.controlSyncTimer);
+    runtime.controlSyncTimer = null;
+  }
+}
+
+function patchInspectorDefaults() {
+  if (runtime.hydratingControls || !runtime.inspectorInteractionStarted) return;
+  patchDefaults({
+    apiMode: dom.apiModeSelect?.value || store.defaults.apiMode,
+    toolChoice: dom.toolChoiceSelect?.value || store.defaults.toolChoice,
+    parallelToolCalls: Boolean(dom.parallelToolCallsCheckbox?.checked),
+    backgroundMode: Boolean(dom.backgroundModeCheckbox?.checked),
+    serviceTier: dom.serviceTierSelect?.value || store.defaults.serviceTier,
+    inputImageUrls: String(dom.attachmentImageUrlInput?.value || '').trim(),
+    inputFileUrls: String(dom.attachmentFileUrlInput?.value || '').trim(),
+    fileSearch: Boolean(dom.fileSearchCheckbox?.checked),
+    fileSearchVectorStoreIds: String(dom.fileSearchVectorStoresInput?.value || '').trim(),
+    fileSearchMaxResults: Math.max(0, parseInt(dom.fileSearchMaxResultsInput?.value || '0', 10) || 0),
+    includeFileSearchResults: Boolean(dom.includeFileSearchResultsCheckbox?.checked),
+    imageGeneration: Boolean(dom.imageGenerationCheckbox?.checked),
+    imageGenerationAction: dom.imageGenerationActionSelect?.value || store.defaults.imageGenerationAction,
+    imageGenerationSize: dom.imageGenerationSizeSelect?.value || store.defaults.imageGenerationSize,
+    imageGenerationQuality: dom.imageGenerationQualitySelect?.value || store.defaults.imageGenerationQuality,
+    imageGenerationPartialImages: Math.max(0, parseInt(dom.imageGenerationPartialImagesInput?.value || '0', 10) || 0),
+  });
+  renderWorkspaceSummary();
+}
+
+function switchInspectorPanel(panel) {
+  const target = String(panel || 'run');
+  dom.inspectorTabs?.forEach((btn) => {
+    const active = btn.getAttribute('data-panel-tab') === target;
+    btn.classList.toggle('active', active);
+    btn.setAttribute('aria-selected', active ? 'true' : 'false');
+  });
+  dom.inspectorSections?.forEach((section) => {
+    section.hidden = section.getAttribute('data-panel-section') !== target;
+  });
+}
+
+function syncControlsFromState() {
+  applyStateToSettingsUI();
+  renderAttachmentChips();
+  renderRequestPreview();
 }
 
 function renderChatList() {
@@ -644,11 +963,44 @@ function renderEmptyState() {
   if (!empty.isConnected) container.appendChild(empty);
 
   if (!hasMessages) {
-    const markdownHolder = document.createElement('div');
-    markdownHolder.className = 'markdown-body mx-auto text-start';
-    markdownHolder.style.maxWidth = 'var(--content-max)';
-    applyMarkdown(markdownHolder, copyContent.empty || defaultCopy.empty);
-    empty.replaceChildren(markdownHolder);
+    const inner = document.createElement('div');
+    inner.className = 'empty-state-inner';
+
+    const icon = document.createElement('div');
+    icon.className = 'empty-icon';
+    icon.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/></svg>';
+
+    const title = document.createElement('h1');
+    title.textContent = copyContent.empty || defaultCopy.empty;
+
+    const subtitle = document.createElement('p');
+    subtitle.textContent = 'Choose a starter, apply a workspace, or type your own message.';
+
+    const grid = document.createElement('div');
+    grid.className = 'prompt-chip-grid';
+
+    for (const item of EMPTY_PROMPTS) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'prompt-chip';
+      btn.textContent = item.label;
+      btn.addEventListener('click', () => insertPromptTemplate(item.prompt));
+      grid.appendChild(btn);
+    }
+
+    const presetStrip = document.createElement('div');
+    presetStrip.className = 'preset-strip';
+    for (const [name, preset] of Object.entries(WORKSPACE_PRESETS)) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'preset-chip';
+      btn.textContent = preset.label;
+      btn.addEventListener('click', () => applyWorkspacePreset(name));
+      presetStrip.appendChild(btn);
+    }
+
+    inner.append(icon, title, subtitle, grid, presetStrip);
+    empty.replaceChildren(inner);
   }
 }
 
@@ -683,6 +1035,8 @@ function createMessageElement(message, { isStreaming = false } = {}) {
   const roleEl = fragment.querySelector('.role');
   const metaEl = fragment.querySelector('.meta');
   const contentEl = fragment.querySelector('.message-content');
+  const artifactsEl = fragment.querySelector('.message-artifacts');
+  const traceEl = fragment.querySelector('.message-trace');
   const footerEl = fragment.querySelector('.message-footer');
   const copyBtn = fragment.querySelector('.action-copy');
   const editBtn = fragment.querySelector('.action-edit');
@@ -703,6 +1057,8 @@ function createMessageElement(message, { isStreaming = false } = {}) {
 
   if (message.role === 'assistant') {
     copyBtn.hidden = false;
+    copyBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+    copyBtn.title = 'Copy';
     copyBtn.addEventListener('click', async (e) => {
       e.preventDefault();
       try {
@@ -714,6 +1070,8 @@ function createMessageElement(message, { isStreaming = false } = {}) {
     });
   } else {
     editBtn.hidden = false;
+    editBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>';
+    editBtn.title = 'Edit';
     editBtn.addEventListener('click', (e) => {
       e.preventDefault();
       handleEditUserMessage(message.id);
@@ -734,12 +1092,77 @@ function createMessageElement(message, { isStreaming = false } = {}) {
     footerEl.hidden = true;
   }
 
+  renderMessageArtifacts(artifactsEl, message.artifacts || []);
+  renderMessageTrace(traceEl, message.trace || []);
+
   dom.conversationInner.appendChild(fragment);
   requestAnimationFrame(() => messageEl.classList.add('appear'));
   renderEmptyState();
   scrollConversationToBottom();
   updateScrollButton();
   return { messageEl, contentEl, metaEl, footerEl };
+}
+
+function renderMessageArtifacts(container, artifacts) {
+  if (!container) return;
+  container.replaceChildren();
+  const list = Array.isArray(artifacts) ? artifacts : [];
+  container.hidden = !list.length;
+  if (!list.length) return;
+
+  for (const artifact of list) {
+    if (!artifact || artifact.type !== 'image' || !artifact.data) continue;
+
+    const figure = document.createElement('figure');
+    figure.className = 'artifact-figure';
+
+    const img = document.createElement('img');
+    img.alt = artifact.revisedPrompt || 'Generated image';
+    img.loading = 'lazy';
+    img.src = `data:${artifact.mimeType || 'image/png'};base64,${artifact.data}`;
+    figure.appendChild(img);
+
+    if (artifact.revisedPrompt) {
+      const caption = document.createElement('figcaption');
+      caption.textContent = artifact.revisedPrompt;
+      figure.appendChild(caption);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'artifact-actions mt-2';
+    const download = document.createElement('a');
+    download.className = 'btn btn-sm btn-outline-secondary';
+    download.href = img.src;
+    download.download = 'chat-llm-image.png';
+    download.textContent = 'Download image';
+    actions.appendChild(download);
+    figure.appendChild(actions);
+
+    container.appendChild(figure);
+  }
+}
+
+function renderMessageTrace(container, trace) {
+  if (!container) return;
+  const items = Array.isArray(trace) ? trace : [];
+  container.replaceChildren();
+  container.hidden = !items.length;
+  if (!items.length) return;
+
+  const label = document.createElement('span');
+  label.className = 'trace-label';
+  label.textContent = 'Run: ';
+  container.appendChild(label);
+
+  items.slice(-8).forEach((item, index) => {
+    if (index) container.append(document.createTextNode(' · '));
+    const chip = document.createElement('span');
+    chip.className = `trace-chip trace-${item.status || 'info'}`;
+    chip.dataset.kind = item.status || 'info';
+    chip.textContent = item.label || item.type || 'event';
+    chip.title = item.detail || '';
+    container.appendChild(chip);
+  });
 }
 
 function renderConversation() {
@@ -759,6 +1182,7 @@ function renderConversation() {
 function updateRegenerateButton() {
   const chat = getActiveChat();
   const hasUser = Boolean(chat?.messages?.some((m) => m.role === 'user'));
+  if (dom.clearChatButton) dom.clearChatButton.hidden = !chat?.messages?.length;
   if (dom.regenerateButton) dom.regenerateButton.hidden = !hasUser || runtime.isProcessing;
 }
 
@@ -767,6 +1191,7 @@ function applyStateToSettingsUI() {
   if (!chat) return;
 
   dom.apiKeyInput.value = getApiKey();
+  if (dom.apiKeySessionCheckbox) dom.apiKeySessionCheckbox.checked = store.defaults.keyPersistence === 'session';
   if (dom.apiBaseUrlInput) dom.apiBaseUrlInput.value = store.defaults.apiBaseUrl || 'https://api.openai.com';
   dom.temperatureInput.value = String(store.defaults.temperature ?? 1.0);
   if (dom.topPInput) dom.topPInput.value = String(store.defaults.topP ?? 0);
@@ -779,6 +1204,22 @@ function applyStateToSettingsUI() {
   if (dom.promptCacheKeyInput) dom.promptCacheKeyInput.value = store.defaults.promptCacheKey || '';
   if (dom.promptCacheRetentionSelect) dom.promptCacheRetentionSelect.value = store.defaults.promptCacheRetention || '';
   if (dom.safetyIdentifierInput) dom.safetyIdentifierInput.value = store.defaults.safetyIdentifier || '';
+  if (dom.apiModeSelect) dom.apiModeSelect.value = store.defaults.apiMode || 'responses';
+  if (dom.toolChoiceSelect) dom.toolChoiceSelect.value = store.defaults.toolChoice || 'auto';
+  if (dom.parallelToolCallsCheckbox) dom.parallelToolCallsCheckbox.checked = store.defaults.parallelToolCalls !== false;
+  if (dom.backgroundModeCheckbox) dom.backgroundModeCheckbox.checked = Boolean(store.defaults.backgroundMode);
+  if (dom.serviceTierSelect) dom.serviceTierSelect.value = store.defaults.serviceTier || 'auto';
+  if (dom.attachmentImageUrlInput) dom.attachmentImageUrlInput.value = store.defaults.inputImageUrls || '';
+  if (dom.attachmentFileUrlInput) dom.attachmentFileUrlInput.value = store.defaults.inputFileUrls || '';
+  if (dom.fileSearchCheckbox) dom.fileSearchCheckbox.checked = Boolean(store.defaults.fileSearch);
+  if (dom.fileSearchVectorStoresInput) dom.fileSearchVectorStoresInput.value = store.defaults.fileSearchVectorStoreIds || '';
+  if (dom.fileSearchMaxResultsInput) dom.fileSearchMaxResultsInput.value = String(store.defaults.fileSearchMaxResults ?? 0);
+  if (dom.includeFileSearchResultsCheckbox) dom.includeFileSearchResultsCheckbox.checked = Boolean(store.defaults.includeFileSearchResults);
+  if (dom.imageGenerationCheckbox) dom.imageGenerationCheckbox.checked = Boolean(store.defaults.imageGeneration);
+  if (dom.imageGenerationActionSelect) dom.imageGenerationActionSelect.value = store.defaults.imageGenerationAction || 'auto';
+  if (dom.imageGenerationSizeSelect) dom.imageGenerationSizeSelect.value = store.defaults.imageGenerationSize || 'auto';
+  if (dom.imageGenerationQualitySelect) dom.imageGenerationQualitySelect.value = store.defaults.imageGenerationQuality || 'auto';
+  if (dom.imageGenerationPartialImagesInput) dom.imageGenerationPartialImagesInput.value = String(store.defaults.imageGenerationPartialImages ?? 0);
   dom.webSearchCheckbox.checked = Boolean(store.defaults.webSearch);
   if (dom.webSearchDomainsInput) dom.webSearchDomainsInput.value = store.defaults.webSearchAllowedDomains || '';
   if (dom.webSearchBlockedDomainsInput) dom.webSearchBlockedDomainsInput.value = store.defaults.webSearchBlockedDomains || '';
@@ -1028,23 +1469,37 @@ function renderCommandResults() {
 
   const items = [];
 
-  const addAction = (label, run) => items.push({ type: 'action', label, run });
-  addAction('New chat', () => handleNewChat());
-  addAction('Open settings', () => openSettingsDrawer());
-  addAction('Choose model', () => openModelPicker());
-  addAction('Toggle theme', () => applyTheme(document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark'));
-  addAction('Apply Writing workspace', () => applyWorkspacePreset('writing'));
-  addAction('Apply Coding workspace', () => applyWorkspacePreset('coding'));
-  addAction('Apply Research workspace', () => applyWorkspacePreset('research'));
+  const addAction = (label, run, meta = 'Action') => items.push({ type: 'action', label, meta, run });
+  addAction('New chat', () => handleNewChat(), 'Chat');
+  addAction('Choose model', () => openModelPicker(), 'Model');
+  addAction('Open API playground', () => openInspector(), 'API');
+  addAction('Copy API request', () => copyRequestPreview(), 'API');
+  addAction('Open settings', () => openSettingsDrawer(), 'Setup');
+  addAction('Privacy reset', () => privacyReset(), 'Safety');
+  addAction('Toggle sidebar', () => toggleSidebarRail(), 'View');
+  addAction('Toggle theme', () => applyTheme(document.documentElement.getAttribute('data-bs-theme') === 'dark' ? 'light' : 'dark'), 'View');
+  addAction(`${store.defaults.webSearch ? 'Disable' : 'Enable'} web search`, () => {
+    patchDefaults({ webSearch: !store.defaults.webSearch });
+    applyStateToSettingsUI();
+  }, 'Tool');
+  addAction(`${store.defaults.localTools ? 'Disable' : 'Enable'} local tools`, () => {
+    patchDefaults({ localTools: !store.defaults.localTools });
+    applyStateToSettingsUI();
+  }, 'Tool');
+  addAction('Apply Writing workspace', () => applyWorkspacePreset('writing'), 'Preset');
+  addAction('Apply Coding workspace', () => applyWorkspacePreset('coding'), 'Preset');
+  addAction('Apply Research workspace', () => applyWorkspacePreset('research'), 'Preset');
 
   const chat = getActiveChat();
+  if (chat?.messages?.some((m) => m.role === 'user')) addAction('Regenerate response', () => regenerateLast(), 'Chat');
+  if (chat?.messages?.length) addAction('Export chat', () => exportCurrentChat(), 'Chat');
   if (chat?.messages?.length) addAction('Clear current chat', () => clearChat());
 
   const chats = listChats({ query: q });
   for (const c of chats) items.push({ type: 'chat', label: c.title, chatId: c.id, meta: c.model });
 
   const filtered = q
-    ? items.filter((i) => i.type === 'chat' || i.label.toLowerCase().includes(q))
+    ? items.filter((i) => `${i.label} ${i.meta || ''}`.toLowerCase().includes(q) || i.type === 'chat')
     : items;
 
   runtime.selectedCommandIndex = filtered.length
@@ -1054,18 +1509,21 @@ function renderCommandResults() {
   filtered.forEach((item, index) => {
     const btn = document.createElement('button');
     btn.type = 'button';
-    btn.className = `btn btn-outline-secondary text-start p-2 d-flex justify-content-between align-items-center gap-3 ${index === runtime.selectedCommandIndex ? 'border-dark' : ''}`;
+    btn.className = `command-item ${index === runtime.selectedCommandIndex ? 'active' : ''}`;
     btn.dataset.index = String(index);
     btn.dataset.kind = item.type;
     if (item.chatId) btn.dataset.chatId = item.chatId;
-    btn.textContent = item.label;
+    btn.setAttribute('aria-label', `${item.label || 'Untitled'} ${item.meta || item.type}`);
 
-    if (item.type === 'chat') {
-      const right = document.createElement('span');
-      right.className = 'small text-body-secondary';
-      right.textContent = item.meta || '';
-      btn.appendChild(right);
-    }
+    const label = document.createElement('span');
+    label.className = 'command-label';
+    label.textContent = item.label || 'Untitled';
+
+    const meta = document.createElement('span');
+    meta.className = 'command-meta';
+    meta.textContent = item.meta || item.type;
+
+    btn.append(label, meta);
 
     btn.addEventListener('click', () => runCommandItem(item));
     dom.commandResults.appendChild(btn);
@@ -1094,10 +1552,58 @@ async function clearChat() {
   renderChatList();
 }
 
+async function privacyReset() {
+  const ok = await confirmDialog({
+    title: 'Privacy reset?',
+    message: 'This clears the API key, chats, settings, cached model list, and local app state in this browser.',
+    confirmText: 'Reset',
+    danger: true,
+  });
+  if (!ok) return;
+  clearApiKey();
+  resetStore();
+  setApiKeyPersistence(store.defaults.keyPersistence || 'memory');
+  updateHeader();
+  applyStateToSettingsUI();
+  renderConversation();
+  renderChatList();
+  toast('Local app data cleared.', { variant: 'success', timeoutMs: 1600 });
+}
+
+async function ensureRequestAllowed(chat) {
+  const model = chat?.model || store.defaults.model || DEFAULT_MODEL;
+  const result = assessRequestPreflight({
+    defaults: store.defaults,
+    model,
+    baseUrl: store.defaults.apiBaseUrl,
+    locationLike: window.location,
+  });
+
+  if (result.status === 'block') {
+    toast(result.blocks.join(' '), { title: 'Request blocked', variant: 'warning', timeoutMs: 6200 });
+    return false;
+  }
+
+  if (result.status === 'confirm') {
+    const ok = await confirmDialog({
+      title: 'Confirm request settings',
+      message: result.confirmations.join('\n\n'),
+      confirmText: 'Send',
+      danger: true,
+    });
+    return ok;
+  }
+
+  return true;
+}
+
 async function generateAssistant() {
   const chat = getActiveChat();
   const apiKey = getApiKey();
   if (!chat || !apiKey) return;
+
+  const allowed = await ensureRequestAllowed(chat);
+  if (!allowed) return;
 
   runtime.abortController = new AbortController();
   setProcessing(true);
@@ -1114,8 +1620,13 @@ async function generateAssistant() {
   let outputText = '';
   let reasoningSummary = '';
   let annotations = [];
+  let artifacts = [];
   let responseId = null;
   let usage = null;
+  const runTrace = [];
+  const addTrace = (type, label, detail = '', status = 'info') => {
+    runTrace.push({ type, label, detail, status, createdAt: nowMs() });
+  };
 
   let scheduled = false;
   const scheduleRender = () => {
@@ -1155,13 +1666,27 @@ async function generateAssistant() {
       webSearchContextSize: store.defaults.webSearchContextSize,
       webSearchExternalAccess: store.defaults.webSearchExternalAccess,
       webSearchReturnTokenBudget: store.defaults.webSearchReturnTokenBudget,
+      fileSearch: store.defaults.fileSearch,
+      fileSearchVectorStoreIds: store.defaults.fileSearchVectorStoreIds,
+      fileSearchMaxResults: store.defaults.fileSearchMaxResults,
+      includeFileSearchResults: store.defaults.includeFileSearchResults,
+      imageGeneration: store.defaults.imageGeneration,
+      imageGenerationAction: store.defaults.imageGenerationAction,
+      imageGenerationSize: store.defaults.imageGenerationSize,
+      imageGenerationQuality: store.defaults.imageGenerationQuality,
+      imageGenerationPartialImages: store.defaults.imageGenerationPartialImages,
+      inputAttachments: getInputAttachments(),
       extraTools,
       store: store.defaults.storeResponses,
       includeEncryptedReasoning: isReasoningModel(model) && !store.defaults.storeResponses,
+      toolChoice: store.defaults.toolChoice,
+      parallelToolCalls: store.defaults.parallelToolCalls,
+      background: store.defaults.backgroundMode,
+      serviceTier: store.defaults.serviceTier,
     };
 
     const lastUser = [...chat.messages].reverse().find((m) => m.role === 'user');
-    const statefulBody = chat.previousResponseId && lastUser
+    const statefulBody = store.defaults.storeResponses && chat.previousResponseId && lastUser
       ? buildResponsesBody({
         ...requestDefaults,
         input: String(lastUser.content || ''),
@@ -1246,6 +1771,11 @@ async function generateAssistant() {
             if (evt?.response?.usage) usage = evt.response.usage;
             const out = Array.isArray(evt?.response?.output) ? evt.response.output : [];
             outputItems = out;
+            const extracted = extractTextAndAnnotationsFromResponse(evt.response);
+            if (!outputText && extracted.outputText) outputText = extracted.outputText;
+            if (!reasoningSummary && extracted.reasoningSummary) reasoningSummary = extracted.reasoningSummary;
+            if (extracted.annotations.length) annotations = extracted.annotations;
+            if (extracted.artifacts?.length) artifacts = extracted.artifacts;
             for (const item of out) {
               if (!item || typeof item !== 'object' || item.type !== 'function_call') continue;
               if (typeof item.call_id !== 'string' || typeof item.name !== 'string') continue;
@@ -1284,11 +1814,15 @@ async function generateAssistant() {
 
         const outputs = [];
         for (const c of calls) {
+          addTrace('tool_call', `tool ${c.name}`, c.arguments || '', 'info');
           try {
             const out = await runLocalToolCall({ name: c.name, argumentsJson: c.arguments });
             outputs.push({ type: 'function_call_output', call_id: c.call_id, output: out });
+            addTrace('tool_result', `${c.name} ok`, out, 'success');
           } catch (e) {
-            outputs.push({ type: 'function_call_output', call_id: c.call_id, output: `Error: ${e?.message || String(e)}` });
+            const formatted = formatToolError(e);
+            outputs.push({ type: 'function_call_output', call_id: c.call_id, output: formatted });
+            addTrace('tool_error', `${c.name} error`, e?.message || String(e), 'error');
           }
         }
 
@@ -1308,9 +1842,11 @@ async function generateAssistant() {
 
     let ran = false;
     let lastErr = null;
+    let usedStatefulFallback = false;
     for (const attempt of bodies) {
       try {
         ran = true;
+        addTrace('request', attempt.kind === 'stateful' ? 'stateful request' : 'history request', '', 'info');
         await runWithLocalTools(attempt.body);
         lastErr = null;
         break;
@@ -1319,10 +1855,13 @@ async function generateAssistant() {
         lastErr = err;
         if (attempt.kind === 'stateful') {
           // If stateful chaining fails, drop the chain and retry with full history.
+          usedStatefulFallback = true;
+          addTrace('fallback', 'retried with history', err?.message || String(err), 'warning');
           setChatPreviousResponseId(chat.id, null);
           outputText = '';
           reasoningSummary = '';
           annotations = [];
+          artifacts = [];
           responseId = null;
           usage = null;
           continue;
@@ -1332,8 +1871,13 @@ async function generateAssistant() {
 
     if (!ran) throw new Error('No request was sent.');
     if (lastErr) throw lastErr;
+    if (usedStatefulFallback) {
+      toast('Stored response chain failed; retried with full local history.', { title: 'State reset', variant: 'warning', timeoutMs: 3600 });
+    }
+    addTrace('completed', 'completed', '', 'success');
 
-    if (!outputText.trim()) throw new Error('Received an empty response.');
+    if (!outputText.trim() && !artifacts.length) throw new Error('Received an empty response.');
+    if (!outputText.trim() && artifacts.length) outputText = 'Generated image artifact.';
 
     if (store.defaults.storeResponses && responseId) {
       try {
@@ -1342,6 +1886,7 @@ async function generateAssistant() {
         if (extracted.outputText) outputText = extracted.outputText;
         if (extracted.reasoningSummary) reasoningSummary = extracted.reasoningSummary;
         if (extracted.annotations.length) annotations = extracted.annotations;
+        if (extracted.artifacts?.length) artifacts = extracted.artifacts;
         usage = full?.usage || usage;
       } catch {
         // ignore
@@ -1350,16 +1895,20 @@ async function generateAssistant() {
 
     const finalMsg = {
       content: outputText,
-      responseId: responseId || undefined,
+      responseId: store.defaults.storeResponses ? responseId || undefined : undefined,
       annotations,
+      artifacts,
       reasoningSummary,
       usage,
+      trace: runTrace,
     };
 
     updateMessage(chat.id, assistantMsg.id, finalMsg);
 
     const md = buildAssistantMarkdown({ ...assistantMsg, ...finalMsg });
     applyMarkdown(contentEl, md);
+    renderMessageArtifacts(messageEl.querySelector('.message-artifacts'), artifacts);
+    renderMessageTrace(messageEl.querySelector('.message-trace'), runTrace);
     if (metaEl) {
       metaEl.hidden = false;
       metaEl.textContent = `${chat.model}`;
@@ -1374,18 +1923,22 @@ async function generateAssistant() {
     }
   } catch (error) {
     if (error?.name === 'AbortError') {
+      addTrace('cancelled', 'cancelled', '', 'warning');
       const cancelled = `${outputText}\n\n[Cancelled]`.trim();
-      updateMessage(chat.id, assistantMsg.id, { content: cancelled });
+      updateMessage(chat.id, assistantMsg.id, { content: cancelled, trace: runTrace });
       setPlainText(contentEl, cancelled);
+      renderMessageTrace(messageEl.querySelector('.message-trace'), runTrace);
       if (metaEl) metaEl.textContent = `${chat.model} • cancelled`;
     } else {
+      addTrace('error', 'error', error?.message || String(error), 'error');
       let detail = error?.message || String(error);
       if (detail === 'Failed to fetch' || detail === 'Load failed') {
         detail = 'Network error (Failed to fetch). Check your connection, API key, and API base URL (Settings → API).';
       }
-      const msg = `⚠️ ${detail}`;
-      updateMessage(chat.id, assistantMsg.id, { content: msg });
+      const msg = `Warning: ${detail}`;
+      updateMessage(chat.id, assistantMsg.id, { content: msg, trace: runTrace });
       setPlainText(contentEl, msg);
+      renderMessageTrace(messageEl.querySelector('.message-trace'), runTrace);
       if (metaEl) metaEl.textContent = `${chat.model} • error`;
     }
   } finally {
@@ -1400,6 +1953,16 @@ async function testConnection() {
   if (!key) return toast('Add your API key first.', { title: 'Missing API key', variant: 'warning' });
 
   const baseUrl = String(dom.apiBaseUrlInput?.value || store.defaults.apiBaseUrl || '').trim() || store.defaults.apiBaseUrl;
+  const preflight = assessRequestPreflight({
+    defaults: { ...store.defaults, apiBaseUrl: baseUrl, apiMode: 'responses' },
+    model: getActiveChat()?.model || store.defaults.model || DEFAULT_MODEL,
+    baseUrl,
+    locationLike: window.location,
+  });
+  if (preflight.status === 'block') {
+    toast(preflight.blocks.join(' '), { title: 'Connection blocked', variant: 'warning', timeoutMs: 5200 });
+    return;
+  }
 
   try {
     if (dom.testConnectionBtn) dom.testConnectionBtn.disabled = true;
@@ -1415,9 +1978,21 @@ async function testConnection() {
 }
 
 function bindUI() {
+  window.addEventListener('chat-llm-storage-error', () => {
+    toast('Browser storage is full or unavailable. Export or clear chats, then try again.', {
+      title: 'Storage warning',
+      variant: 'warning',
+      timeoutMs: 5200,
+    });
+  });
+
+  dom.sidebarToggle?.addEventListener('click', toggleSidebarRail);
   dom.sidebarOpen?.addEventListener('click', openSidebar);
   dom.sidebarClose?.addEventListener('click', closeSidebar);
   dom.sidebarBackdrop?.addEventListener('click', closeSidebar);
+  dom.inspectorToggle?.addEventListener('click', toggleInspector);
+  dom.inspectorBackdrop?.addEventListener('click', closeInspector);
+  window.addEventListener('resize', debounce(syncResponsiveChrome, 80));
   dom.scrollBottom?.addEventListener('click', () => scrollConversationToBottom({ force: true }));
 
   dom.newChat?.addEventListener('click', handleNewChat);
@@ -1435,9 +2010,18 @@ function bindUI() {
     closeSidebar();
     openSettingsDrawer();
   });
-  dom.settingsCloseBtn?.addEventListener('click', closeSettingsDrawer);
+  dom.settingsCloseBtn?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    closeSettingsDrawer();
+  }, { capture: true });
   dom.drawerBackdrop?.addEventListener('click', closeSettingsDrawer);
   dom.testConnectionBtn?.addEventListener('click', testConnection);
+  dom.privacyResetBtn?.addEventListener('click', privacyReset);
+  dom.connectionStatus?.addEventListener('click', () => {
+    closeSidebar();
+    openSettingsDrawer();
+  });
 
   dom.settingsDrawer?.addEventListener('click', (e) => {
     const btn = e.target?.closest?.('[data-settings-jump]');
@@ -1450,10 +2034,12 @@ function bindUI() {
   dom.settingsForm?.addEventListener('submit', (e) => {
     e.preventDefault();
 
-    setApiKey(dom.apiKeyInput?.value || '');
+    const keyPersistence = dom.apiKeySessionCheckbox?.checked ? 'session' : 'memory';
+    setApiKey(dom.apiKeyInput?.value || '', { persistence: keyPersistence });
 
     patchDefaults({
-      apiBaseUrl: String(dom.apiBaseUrlInput?.value || '').trim() || store.defaults.apiBaseUrl,
+      apiBaseUrl: normalizeBaseUrl(dom.apiBaseUrlInput?.value || store.defaults.apiBaseUrl),
+      keyPersistence,
       temperature: Number(dom.temperatureInput?.value),
       topP: Number(dom.topPInput?.value),
       maxOutputTokens: Math.max(0, parseInt(dom.maxOutputTokensInput?.value || '0', 10) || 0),
@@ -1462,6 +2048,11 @@ function bindUI() {
       textVerbosity: dom.textVerbositySelect?.value || store.defaults.textVerbosity,
       truncation: dom.truncationSelect?.value || store.defaults.truncation,
       maxToolCalls: Math.max(0, parseInt(dom.maxToolCallsInput?.value || '0', 10) || 0),
+      apiMode: dom.apiModeSelect?.value || store.defaults.apiMode,
+      toolChoice: dom.toolChoiceSelect?.value || store.defaults.toolChoice,
+      parallelToolCalls: Boolean(dom.parallelToolCallsCheckbox?.checked),
+      backgroundMode: Boolean(dom.backgroundModeCheckbox?.checked),
+      serviceTier: dom.serviceTierSelect?.value || store.defaults.serviceTier,
       promptCacheKey: String(dom.promptCacheKeyInput?.value || '').trim(),
       promptCacheRetention: dom.promptCacheRetentionSelect?.value || '',
       safetyIdentifier: String(dom.safetyIdentifierInput?.value || '').trim(),
@@ -1471,6 +2062,17 @@ function bindUI() {
       webSearchContextSize: dom.webSearchContextSizeSelect?.value || store.defaults.webSearchContextSize,
       webSearchExternalAccess: Boolean(dom.webSearchExternalAccessCheckbox?.checked),
       webSearchReturnTokenBudget: dom.webSearchReturnTokenBudgetSelect?.value || store.defaults.webSearchReturnTokenBudget,
+      fileSearch: Boolean(dom.fileSearchCheckbox?.checked),
+      fileSearchVectorStoreIds: String(dom.fileSearchVectorStoresInput?.value || '').trim(),
+      fileSearchMaxResults: Math.max(0, parseInt(dom.fileSearchMaxResultsInput?.value || '0', 10) || 0),
+      includeFileSearchResults: Boolean(dom.includeFileSearchResultsCheckbox?.checked),
+      imageGeneration: Boolean(dom.imageGenerationCheckbox?.checked),
+      imageGenerationAction: dom.imageGenerationActionSelect?.value || store.defaults.imageGenerationAction,
+      imageGenerationSize: dom.imageGenerationSizeSelect?.value || store.defaults.imageGenerationSize,
+      imageGenerationQuality: dom.imageGenerationQualitySelect?.value || store.defaults.imageGenerationQuality,
+      imageGenerationPartialImages: Math.max(0, parseInt(dom.imageGenerationPartialImagesInput?.value || '0', 10) || 0),
+      inputImageUrls: String(dom.attachmentImageUrlInput?.value || '').trim(),
+      inputFileUrls: String(dom.attachmentFileUrlInput?.value || '').trim(),
       localTools: Boolean(dom.localToolsCheckbox?.checked),
       storeResponses: Boolean(dom.storeCheckbox?.checked),
     });
@@ -1493,6 +2095,16 @@ function bindUI() {
   dom.modelSearch?.addEventListener('input', renderModelList);
 
   dom.modelsRefresh?.addEventListener('click', async () => {
+    const preflight = assessRequestPreflight({
+      defaults: store.defaults,
+      model: getActiveChat()?.model || store.defaults.model || DEFAULT_MODEL,
+      baseUrl: store.defaults.apiBaseUrl,
+      locationLike: window.location,
+    });
+    if (preflight.status === 'block') {
+      toast(preflight.blocks.join(' '), { title: 'Refresh blocked', variant: 'warning', timeoutMs: 5200 });
+      return;
+    }
     try {
       dom.modelsRefresh.disabled = true;
       const ids = await refreshAccountModels({ apiKey: getApiKey(), baseUrl: store.defaults.apiBaseUrl });
@@ -1551,6 +2163,7 @@ function bindUI() {
 
   dom.stopButton?.addEventListener('click', () => runtime.abortController?.abort());
   dom.regenerateButton?.addEventListener('click', regenerateLast);
+  dom.copyRequestButton?.addEventListener('click', copyRequestPreview);
 
   dom.toolCalcRun?.addEventListener('click', runCalculatorWidget);
   dom.toolCalcInput?.addEventListener('keydown', (e) => {
@@ -1588,21 +2201,36 @@ function bindUI() {
   dom.workspacePresetButtons?.forEach((btn) => {
     btn.addEventListener('click', () => applyWorkspacePreset(btn.getAttribute('data-workspace-preset')));
   });
-
-  dom.exportChatButton?.addEventListener('click', () => {
-    const chat = getActiveChat();
-    if (!chat) return;
-    const now = new Date().toISOString().replace(/[:.]/g, '-');
-    const blob = new Blob([JSON.stringify({ chat, defaults: store.defaults }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `chat-llm-${now}.json`;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+  dom.inspectorTabs?.forEach((btn) => {
+    btn.addEventListener('click', () => switchInspectorPanel(btn.getAttribute('data-panel-tab')));
   });
+  [
+    dom.apiModeSelect,
+    dom.toolChoiceSelect,
+    dom.parallelToolCallsCheckbox,
+    dom.backgroundModeCheckbox,
+    dom.serviceTierSelect,
+    dom.attachmentImageUrlInput,
+    dom.attachmentFileUrlInput,
+    dom.fileSearchCheckbox,
+    dom.fileSearchVectorStoresInput,
+    dom.fileSearchMaxResultsInput,
+    dom.includeFileSearchResultsCheckbox,
+    dom.imageGenerationCheckbox,
+    dom.imageGenerationActionSelect,
+    dom.imageGenerationSizeSelect,
+    dom.imageGenerationQualitySelect,
+    dom.imageGenerationPartialImagesInput,
+  ].forEach((control) => {
+    control?.addEventListener('pointerdown', markInspectorInteraction);
+    control?.addEventListener('keydown', markInspectorInteraction);
+    control?.addEventListener('change', patchInspectorDefaults);
+    if (control?.tagName === 'TEXTAREA' || control?.tagName === 'INPUT') {
+      control.addEventListener('input', debounce(patchInspectorDefaults, 160));
+    }
+  });
+
+  dom.exportChatButton?.addEventListener('click', exportCurrentChat);
 
   dom.composerForm?.addEventListener('submit', (e) => {
     e.preventDefault();
@@ -1664,6 +2292,7 @@ function bindUI() {
       if (dom.commandPalette?.classList.contains('open')) return closeCommandPalette();
       if (dom.modelPicker?.classList.contains('open')) return closeModelPicker();
       if (dom.settingsDrawer?.classList.contains('open')) return closeSettingsDrawer();
+      if (dom.appShell?.classList.contains('inspector-open')) return closeInspector();
       if (dom.sidebar?.classList.contains('open')) return closeSidebar();
     }
 
@@ -1685,9 +2314,17 @@ function bindUI() {
 }
 
 export async function initApp() {
+  if (runtime.controlSyncTimer) {
+    window.clearInterval(runtime.controlSyncTimer);
+    runtime.controlSyncTimer = null;
+  }
+  runtime.hydratingControls = true;
+  runtime.inspectorInteractionStarted = false;
   loadThemePreference();
+  syncSidebarPreference();
   configureMarkdown();
   load();
+  setApiKeyPersistence(store.defaults.keyPersistence || 'memory');
   await loadCopy();
   applyCopy();
 
@@ -1702,7 +2339,28 @@ export async function initApp() {
   autoResizeTextarea(dom.userInput, COMPOSER_MAX_HEIGHT);
   renderWorkspaceSummary();
   updateTextStatsWidget();
-  runClockWidget();
+  if (dom.toolTimezoneOutput) runClockWidget();
 
   bindUI();
+  switchInspectorPanel('run');
+  requestAnimationFrame(syncControlsFromState);
+  [120, 500, 1200, 2400].forEach((delay) => window.setTimeout(syncControlsFromState, delay));
+  runtime.controlSyncTimer = window.setInterval(() => {
+    if (runtime.inspectorInteractionStarted) {
+      window.clearInterval(runtime.controlSyncTimer);
+      runtime.controlSyncTimer = null;
+      return;
+    }
+    syncControlsFromState();
+  }, 500);
+  window.setTimeout(() => {
+    syncControlsFromState();
+    runtime.hydratingControls = false;
+  }, 3200);
+  window.setTimeout(() => {
+    if (runtime.controlSyncTimer) {
+      window.clearInterval(runtime.controlSyncTimer);
+      runtime.controlSyncTimer = null;
+    }
+  }, 15000);
 }

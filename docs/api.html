@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="OpenAI Responses API features supported by Chat LLM, including GPT-5.5, web search, file search, image generation, attachments, and request preview.">
+  <link rel="canonical" href="https://chat.fenosys.com/docs/api.html">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../site.css">
+  <title>API Features - Chat LLM</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">CL</span><span>Chat LLM</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="../app.html">Open app</a>
+      <a href="setup.html">Setup</a>
+      <a href="api.html">API features</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </header>
+
+  <main class="doc-layout">
+    <aside class="doc-sidebar" aria-label="API sections">
+      <a href="#models">Models</a>
+      <a href="#web-search">Web search</a>
+      <a href="#file-search">File search</a>
+      <a href="#image-generation">Image generation</a>
+      <a href="#attachments">Attachments</a>
+      <a href="#request-preview">Request preview</a>
+    </aside>
+    <article>
+      <section class="doc-hero">
+        <h1>API support in Chat LLM.</h1>
+        <p>The app is built around <code>POST /v1/responses</code> and keeps current model, tool, and multimodal controls visible in a dedicated run inspector.</p>
+      </section>
+
+      <div class="doc-body">
+        <section class="doc-panel" id="models">
+          <h2>Models</h2>
+          <p>The default model is <code>gpt-5.5</code>. The model picker includes GPT-5.4, GPT-5, Codex, o-series reasoning, audio, search, and computer-use model IDs where relevant. Requests use the Responses API only.</p>
+        </section>
+
+        <section class="doc-panel" id="web-search">
+          <h2>Web search</h2>
+          <p>Enable the Responses API <code>web_search</code> tool, configure allowed or blocked domains, choose context size, set external access, and request source inclusion for citations.</p>
+        </section>
+
+        <section class="doc-panel" id="file-search">
+          <h2>File search</h2>
+          <p>File search accepts vector store IDs and a max-results cap. This static app does not upload or index files by itself; use vector stores that already exist in your OpenAI project.</p>
+        </section>
+
+        <section class="doc-panel" id="image-generation">
+          <h2>Image generation</h2>
+          <p>The image generation tool can be enabled from the Tools inspector with action, size, quality, and partial image frame controls. Generated image artifacts render inside assistant messages, and oversized base64 payloads are not persisted.</p>
+        </section>
+
+        <section class="doc-panel" id="attachments">
+          <h2>Attachments</h2>
+          <p>The Sources inspector accepts image URLs and file URLs for the next turn. Those values are converted to Responses API <code>input_image</code> and <code>input_file</code> content items.</p>
+        </section>
+
+        <section class="doc-panel" id="request-preview">
+          <h2>Request preview</h2>
+          <p>The API inspector shows a sanitized request payload before sending. It helps verify model, reasoning, tool choice, prompt cache, service tier, and attachment state. A static preflight blocks unsupported modes and asks for confirmation before expensive or stateful options.</p>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>Chat LLM</span>
+    <a href="../index.html">Home</a>
+    <a href="../app.html">Open app</a>
+  </footer>
+</body>
+</html>

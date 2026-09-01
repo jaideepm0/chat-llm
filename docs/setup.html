@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Setup guide for Chat LLM, a static GitHub Pages compatible OpenAI Responses API chat workspace.">
+  <link rel="canonical" href="https://chat.fenosys.com/docs/setup.html">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../site.css">
+  <title>Setup - Chat LLM</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">CL</span><span>Chat LLM</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="../app.html">Open app</a>
+      <a href="setup.html">Setup</a>
+      <a href="api.html">API features</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </header>
+
+  <main class="doc-layout">
+    <aside class="doc-sidebar" aria-label="Setup sections">
+      <a href="#quick-start">Quick start</a>
+      <a href="#github-pages">GitHub Pages</a>
+      <a href="#api-key">API key</a>
+      <a href="#local-development">Local development</a>
+    </aside>
+    <article>
+      <section class="doc-hero">
+        <h1>Setup Chat LLM.</h1>
+        <p>Run the app locally or publish it on GitHub Pages without a build step or server runtime.</p>
+      </section>
+
+      <div class="doc-body">
+        <section class="doc-panel" id="quick-start">
+          <h2>Quick start</h2>
+          <ol>
+            <li>Open <a href="../app.html">the app workspace</a>.</li>
+            <li>Press Send once or open Settings from the left rail.</li>
+            <li>Paste an OpenAI API key. It stays in memory by default; optionally remember it for this tab session.</li>
+            <li>Choose a model, type a message, and send.</li>
+          </ol>
+        </section>
+
+        <section class="doc-panel" id="github-pages">
+          <h2>GitHub Pages</h2>
+          <p>Publish the repository root with GitHub Pages. The app uses static HTML, CSS, JavaScript modules, and vendored browser assets only.</p>
+          <p>The app page is <code>/app.html</code>. The homepage and docs pages are crawlable static pages for discoverability.</p>
+        </section>
+
+        <section class="doc-panel" id="api-key">
+          <h2>API key</h2>
+          <p>For personal or trusted-team use, paste a key in Settings. This app is BYOK: every request goes directly from the browser to OpenAI, and the app never ships a shared key.</p>
+        </section>
+
+        <section class="doc-panel" id="local-development">
+          <h2>Local development</h2>
+          <pre><code>python3 -m http.server 8092
+open http://127.0.0.1:8092/</code></pre>
+          <p>Localhost API base URLs are allowed only while running locally. Run <code>npm run verify</code> before publishing changes.</p>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>Chat LLM</span>
+    <a href="../index.html">Home</a>
+    <a href="../app.html">Open app</a>
+  </footer>
+</body>
+</html>

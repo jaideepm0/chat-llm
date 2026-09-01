@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Privacy and security notes for Chat LLM, a static OpenAI Responses API chat application.">
+  <link rel="canonical" href="https://chat.fenosys.com/docs/privacy.html">
+  <link rel="icon" type="image/svg+xml" href="../favicon.svg">
+  <link rel="stylesheet" href="../site.css">
+  <title>Privacy - Chat LLM</title>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">CL</span><span>Chat LLM</span></a>
+    <nav class="site-nav" aria-label="Primary">
+      <a href="../app.html">Open app</a>
+      <a href="setup.html">Setup</a>
+      <a href="api.html">API features</a>
+      <a href="privacy.html">Privacy</a>
+    </nav>
+  </header>
+
+  <main class="doc-layout">
+    <aside class="doc-sidebar" aria-label="Privacy sections">
+      <a href="#key-storage">Key storage</a>
+      <a href="#browser-state">Browser state</a>
+      <a href="#production">Production use</a>
+      <a href="#content-safety">Content safety</a>
+    </aside>
+    <article>
+      <section class="doc-hero">
+        <h1>Privacy and security notes.</h1>
+        <p>Chat LLM is intentionally static. That makes deployment simple, but it also means browser-side API calls have important constraints.</p>
+      </section>
+
+      <div class="doc-body">
+        <section class="doc-panel" id="key-storage">
+          <h2>API key storage</h2>
+          <p>The OpenAI API key is memory-only by default. If you enable the tab-session option, it is stored in <code>sessionStorage</code> until the tab session ends. In both modes, requests are sent directly from your browser to OpenAI.</p>
+        </section>
+
+        <section class="doc-panel" id="browser-state">
+          <h2>Browser state</h2>
+          <p>Chat history, settings, and model choices are stored in local browser storage. Oversized artifacts are kept out of persisted storage, and Privacy reset clears keys, chats, settings, and cached account models.</p>
+        </section>
+
+        <section class="doc-panel" id="production">
+          <h2>Production use</h2>
+          <p>This milestone is intentionally pure GitHub Pages. It is suitable for BYOK personal or trusted-team distribution, not for shared-key SaaS use. A static page cannot hide API keys from the browser runtime.</p>
+        </section>
+
+        <section class="doc-panel" id="content-safety">
+          <h2>Content safety</h2>
+          <p>Assistant output is rendered through the app markdown sanitizer. The chat app uses vendored scripts and styles with a restrictive content security policy that keeps script and style loading on the same origin.</p>
+        </section>
+      </div>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <span>Chat LLM</span>
+    <a href="../index.html">Home</a>
+    <a href="../app.html">Open app</a>
+  </footer>
+</body>
+</html>

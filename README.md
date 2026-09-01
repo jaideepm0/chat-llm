@@ -1,6 +1,6 @@
 # Chat LLM (GitHub Pages–compatible)
 
-A fully static, single-page chat UI that talks to OpenAI via `POST /v1/responses` (streaming). Designed to work on GitHub Pages (no backend, no build step).
+A fully static chat UI that talks to OpenAI via `POST /v1/responses` (streaming). Designed to work on GitHub Pages (no backend, no build step), with a crawlable homepage and separate documentation pages.
 
 ## Features
 
@@ -16,7 +16,7 @@ A fully static, single-page chat UI that talks to OpenAI via `POST /v1/responses
 
 ## Run it
 
-- GitHub Pages: enable Pages for the repo root.
+- GitHub Pages: enable Pages for the repo root. The homepage is `/`; the app is `/app.html`.
 - Local dev: run a static server (recommended so `content.md` can be fetched): `python3 -m http.server 8000` then open `http://localhost:8000`.
 - Tests: run `npm run verify` for syntax checks and Node regression tests.
 
@@ -32,11 +32,16 @@ This repo intentionally does **not** use `chat.completions`.
 
 ## Code layout
 
-- `index.html`: static app shell (GitHub Pages compatible)
-- `styles.css`: small custom styles (no build step)
+- `index.html`: crawlable homepage for search engines and product discovery
+- `app.html`: static app shell (GitHub Pages compatible)
+- `docs/`: setup, API feature, and privacy pages
+- `robots.txt` / `sitemap.xml`: static SEO crawl hints
+- `styles.css`: app styles (no build step)
+- `site.css`: homepage and docs styles
 - `src/app.js`: entrypoint
 - `src/ui.js`: UI + UX wiring (sidebar, modals, shortcuts)
 - `src/api.js`: `v1/responses` streaming + optional `v1/models` refresh
+- `src/security.js`: static preflight checks for endpoint, risky settings, and capability conflicts
 - `src/state.js`: persisted store (multiple chats)
 - `src/models.js`: curated model catalog + Standard-tier pricing labels
 
@@ -97,9 +102,12 @@ The web search tool is billed separately from model tokens (tool calls + search 
 
 ## Security (honest constraints)
 
-- Your API key is stored in `sessionStorage` (tab session only) and sent directly from the browser to OpenAI.
-- Don’t deploy this as a public, multi-user app without a backend proxy.
-- UI output is sanitized (DOMPurify) and a restrictive CSP is set via `<meta http-equiv="Content-Security-Policy">`.
+- This is a pure GitHub Pages BYOK app. There is no backend, no proxy, no shared public key, and no server-side secret custody.
+- API keys are memory-only by default. Users can explicitly opt in to `sessionStorage` for the current tab session.
+- Requests are sent directly from the browser to OpenAI, so API keys are visible to the browser runtime and browser extensions.
+- The app blocks non-OpenAI API base URLs in normal GitHub Pages mode and only allows localhost endpoints during local development.
+- External script/style CDNs are vendored into `assets/vendor/`; the app CSP keeps scripts and styles on `self` and limits API connections to OpenAI plus localhost development.
+- UI output is sanitized with DOMPurify. Chat export, request preview, logs, toasts, and persisted defaults intentionally exclude API keys.
 
 ## Customize copy
 

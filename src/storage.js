@@ -26,7 +26,31 @@ export function readJSON(storage, key, fallback = null) {
 export function writeJSON(storage, key, value) {
   try {
     storage?.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // ignore
+    try {
+      globalThis.window?.dispatchEvent(new CustomEvent('chat-llm-storage-error', {
+        detail: { key, message: 'Browser storage is full or unavailable.' },
+      }));
+    } catch {
+      // ignore
+    }
+    return false;
+  }
+}
+
+export function writeText(storage, key, value) {
+  try {
+    storage?.setItem(key, String(value));
+    return true;
+  } catch {
+    try {
+      globalThis.window?.dispatchEvent(new CustomEvent('chat-llm-storage-error', {
+        detail: { key, message: 'Browser storage is full or unavailable.' },
+      }));
+    } catch {
+      // ignore
+    }
+    return false;
   }
 }
